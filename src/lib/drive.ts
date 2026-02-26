@@ -6,6 +6,13 @@ import { prisma } from "@/lib/prisma";
 
 const DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"];
 
+type DriveErrorLike = {
+  message?: string;
+  code?: number;
+  status?: number;
+  errors?: Array<{ reason?: string; message?: string }>;
+};
+
 function getDriveClient() {
   if (!env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !env.GOOGLE_PRIVATE_KEY) {
     throw new Error("Google Drive service account env vars are missing");
@@ -145,6 +152,41 @@ export async function getDriveFolderMeta(folderId: string) {
     supportsAllDrives: true
   });
   return response.data;
+}
+
+export function isDriveStorageQuotaError(error: unknown) {
+  const err = (error || {}) as DriveErrorLike;
+  if (typeof err.message === "string" && err.message.includes("Service Accounts do not have storage quota")) {
+    return true;
+  }
+  return Boolean(err.errors?.some((item) => item.reason === "storageQuotaExceeded"));
+}
+
+export async function assertDriveFolderWritable(folderId: string) {
+  const drive = getDriveClient();
+  const probeName = `_fotofacil_probe_${Date.now()}.txt`;
+  const created = await drive.files.create({
+    requestBody: {
+      name: probeName,
+      parents: [folderId]
+    },
+    media: {
+      mimeType: "text/plain",
+      body: Readable.from(Buffer.from("probe"))
+    },
+    fields: "id",
+    supportsAllDrives: true
+  });
+
+  const probeId = created.data.id;
+  if (!probeId) {
+    throw new Error("Drive write probe failed");
+  }
+
+  await drive.files.delete({
+    fileId: probeId,
+    supportsAllDrives: true
+  });
 }
 
 export async function downloadDriveFile(fileId: string) {

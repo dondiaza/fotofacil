@@ -2,7 +2,7 @@ import { parseDateKey, toDayStart, todayDateKey, formatDateKey } from "@/lib/dat
 import { badRequest, unauthorized } from "@/lib/http";
 import { requireStore } from "@/lib/request-auth";
 import { getEffectiveSlots, getOrCreateUploadDay, refreshUploadDayStatus } from "@/lib/store-service";
-import { ensureDateFolder, ensureStoreFolder, uploadBufferToDrive } from "@/lib/drive";
+import { ensureDateFolder, ensureStoreFolder, isDriveStorageQuotaError, uploadBufferToDrive } from "@/lib/drive";
 import { normalizeImageBuffer } from "@/lib/upload";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
@@ -156,6 +156,12 @@ export async function POST(request: Request) {
       message.includes("Google Drive service account env vars are missing")
     ) {
       return badRequest("Google Drive no está configurado. Revisa Ajustes > Drive.");
+    }
+
+    if (isDriveStorageQuotaError(error)) {
+      return badRequest(
+        "Google Drive bloquea la subida: la Service Account no tiene cuota en My Drive. Usa una carpeta en Shared Drive o activa impersonación/OAuth."
+      );
     }
 
     return Response.json({ error: "Error interno durante la subida" }, { status: 500 });

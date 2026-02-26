@@ -2,7 +2,7 @@ import { z } from "zod";
 import { badRequest, unauthorized } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/request-auth";
-import { getConfiguredDriveRootFolderId, getDriveFolderMeta } from "@/lib/drive";
+import { assertDriveFolderWritable, getConfiguredDriveRootFolderId, getDriveFolderMeta, isDriveStorageQuotaError } from "@/lib/drive";
 import { writeAuditLog } from "@/lib/audit";
 
 const payloadSchema = z.object({
@@ -64,6 +64,17 @@ export async function PUT(request: Request) {
 
   if (meta.mimeType !== "application/vnd.google-apps.folder") {
     return badRequest("El ID indicado no corresponde a una carpeta de Google Drive");
+  }
+
+  try {
+    await assertDriveFolderWritable(parsed.data.driveRootFolderId);
+  } catch (error) {
+    if (isDriveStorageQuotaError(error)) {
+      return badRequest(
+        "No se puede subir con Service Account en esa carpeta (cuota 0). Usa una carpeta en Shared Drive o activa impersonación/OAuth de usuario."
+      );
+    }
+    return badRequest("La carpeta existe pero no tiene permisos de escritura para esta integración.");
   }
 
   const updated = await prisma.appConfig.upsert({
