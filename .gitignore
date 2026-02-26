@@ -1,0 +1,33 @@
+# dependencies
+/node_modules
+
+# nextjs
+/.next
+/out
+
+# build
+/dist
+/.tools
+
+# misc
+.DS_Store
+*.pem
+dev.db
+.tmp_*
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# local env
+.env
+.env.local
+.env.*.local
+
+# vercel
+.vercel
+
+# prisma generated
+src/generated

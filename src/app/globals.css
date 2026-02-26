@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Aptos", "Segoe UI Variable", "Segoe UI", "Noto Sans", sans-serif;
+  --font-display: "Bahnschrift", "Franklin Gothic Medium", "Aptos Display", sans-serif;
+  --bg: #f3f7fb;
+  --panel: #ffffff;
+  --line: #d8e4ef;
+  --text: #10212f;
+  --muted: #5c7387;
+  --primary: #007f8f;
+  --success: #12805f;
+  --warning: #a96d0c;
+  --danger: #b83f3f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 90% 0%, rgba(0, 127, 143, 0.18), transparent 40%),
+    radial-gradient(circle at 10% 20%, rgba(16, 33, 47, 0.08), transparent 50%),
+    var(--bg);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+@layer components {
+  .app-shell {
+    @apply mx-auto w-full max-w-[1100px] px-4 pb-8 pt-4 sm:px-6;
+  }
+
+  .panel {
+    @apply rounded-xl2 border border-line bg-panel shadow-soft;
+  }
+
+  .chip {
+    @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition active:scale-[0.98];
+  }
+
+  .btn-primary {
+    @apply btn bg-primary text-white hover:brightness-95;
+  }
+
+  .btn-ghost {
+    @apply btn border border-line bg-white text-text hover:bg-slate-50;
+  }
+
+  .input {
+    @apply h-11 w-full rounded-xl border border-line bg-white px-3 text-sm outline-none transition focus:border-primary;
+  }
+}

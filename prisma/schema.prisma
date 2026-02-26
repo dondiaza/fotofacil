@@ -1,0 +1,164 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  STORE
+  SUPERADMIN
+}
+
+enum UploadStatus {
+  PENDING
+  PARTIAL
+  COMPLETE
+}
+
+enum AlertType {
+  MISSING_UPLOAD
+}
+
+model User {
+  id           String   @id @default(cuid())
+  role         Role
+  email        String?  @unique
+  username     String   @unique
+  passwordHash String
+  mustChangePw Boolean  @default(true)
+  storeId      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  store Store? @relation(fields: [storeId], references: [id])
+
+  @@index([role])
+  @@index([storeId])
+}
+
+model Store {
+  id            String   @id @default(cuid())
+  name          String
+  storeCode     String   @unique
+  isActive      Boolean  @default(true)
+  deadlineTime  String?
+  driveFolderId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users         User[]
+  slotTemplates SlotTemplate[]
+  uploadDays    UploadDay[]
+  alerts        Alert[]
+  messages      Message[]
+  auditLogs     AuditLog[]
+
+  @@index([isActive])
+}
+
+model SlotTemplate {
+  id            String   @id @default(cuid())
+  name          String
+  required      Boolean  @default(true)
+  order         Int      @default(0)
+  allowMultiple Boolean  @default(false)
+  storeId       String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, order])
+  @@unique([name, storeId])
+}
+
+model UploadDay {
+  id           String       @id @default(cuid())
+  storeId      String
+  date         DateTime
+  status       UploadStatus @default(PENDING)
+  driveFolderId String?
+  completedAt  DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  store Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  files UploadFile[]
+
+  @@unique([storeId, date])
+  @@index([date, status])
+}
+
+model UploadFile {
+  id               String   @id @default(cuid())
+  uploadDayId      String
+  slotName         String
+  sequence         Int      @default(1)
+  originalFilename String
+  finalFilename    String
+  driveFileId      String
+  driveWebViewLink String?
+  mimeType         String
+  bytes            Int
+  createdAt        DateTime @default(now())
+
+  uploadDay UploadDay @relation(fields: [uploadDayId], references: [id], onDelete: Cascade)
+
+  @@index([uploadDayId, slotName])
+}
+
+model Alert {
+  id         String    @id @default(cuid())
+  storeId    String
+  date       DateTime
+  type       AlertType
+  triggeredAt DateTime @default(now())
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, date, type])
+  @@index([date, resolvedAt])
+}
+
+model Message {
+  id                    String   @id @default(cuid())
+  storeId               String
+  fromRole              Role
+  text                  String
+  attachmentDriveFileId String?
+  attachmentWebViewLink String?
+  createdAt             DateTime @default(now())
+  readAt                DateTime?
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, createdAt])
+  @@index([readAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  storeId   String?
+  userId    String?
+  action    String
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+
+  @@index([storeId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+}
+
+model AppConfig {
+  id                Int      @id @default(1)
+  driveRootFolderId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}

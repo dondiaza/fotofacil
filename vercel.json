@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/daily-check-missing-uploads",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}
