@@ -27,6 +27,18 @@ function dateOffset(daysBack: number) {
   return date.toISOString().slice(0, 10);
 }
 
+async function readJsonSafe(response: Response) {
+  const raw = await response.text();
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as { error?: string } & Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 export function StoreUploadWizard() {
   const [dateKey, setDateKey] = useState(() => new Date().toISOString().slice(0, 10));
   const [dayView, setDayView] = useState<DayView | null>(null);
@@ -41,12 +53,16 @@ export function StoreUploadWizard() {
     setError(null);
     try {
       const response = await fetch(`/api/store/today?date=${date}`);
-      const json = await response.json();
+      const json = await readJsonSafe(response);
       if (!response.ok) {
-        setError(json.error || "No se pudo cargar el día");
+        setError((json as { error?: string } | null)?.error || "No se pudo cargar el día");
         return;
       }
-      setDayView(json);
+      if (!json) {
+        setError("Respuesta inválida del servidor");
+        return;
+      }
+      setDayView(json as unknown as DayView);
       setUploadMap({});
       setFileMap({});
     } catch {
@@ -116,10 +132,10 @@ export function StoreUploadWizard() {
       method: "POST",
       body: formData
     });
-    const json = await response.json();
+    const json = await readJsonSafe(response);
     if (!response.ok) {
       setUploadMap((prev) => ({ ...prev, [slotName]: "error" }));
-      throw new Error(json.error || "No se pudo subir la foto");
+      throw new Error((json as { error?: string } | null)?.error || `No se pudo subir la foto (${response.status})`);
     }
     setUploadMap((prev) => ({ ...prev, [slotName]: "success" }));
   };
