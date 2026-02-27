@@ -2,7 +2,7 @@ import { z } from "zod";
 import { UploadStatus } from "@prisma/client";
 import { hashPassword } from "@/lib/auth";
 import { DEFAULT_DEADLINE } from "@/lib/constants";
-import { formatDateKey, toDayStart } from "@/lib/date";
+import { formatDateKey, parseDateKey, toDayStart } from "@/lib/date";
 import { badRequest, forbidden, unauthorized } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import { requireManager, storeScopeWhere } from "@/lib/request-auth";
@@ -41,10 +41,19 @@ export async function GET(request: Request) {
     return unauthorized();
   }
 
-  const today = toDayStart(new Date());
   const url = new URL(request.url);
   const statusFilter = url.searchParams.get("status");
   const includeInactive = url.searchParams.get("includeInactive") === "true";
+  const dateParam = url.searchParams.get("date");
+
+  let targetDay = toDayStart(new Date());
+  if (dateParam) {
+    try {
+      targetDay = parseDateKey(dateParam);
+    } catch (error) {
+      return badRequest((error as Error).message);
+    }
+  }
 
   const scope = storeScopeWhere(manager);
   const where = {
@@ -71,7 +80,7 @@ export async function GET(request: Request) {
         }
       },
       uploadDays: {
-        where: { date: today },
+        where: { date: targetDay },
         select: {
           id: true,
           status: true,
@@ -85,7 +94,7 @@ export async function GET(request: Request) {
       },
       alerts: {
         where: {
-          date: today,
+          date: targetDay,
           resolvedAt: null
         },
         select: {
@@ -124,7 +133,7 @@ export async function GET(request: Request) {
         todayStatus: status,
         todayIsSent: todayUpload?.isSent ?? false,
         todayRequirementKind: todayUpload?.requirementKind ?? "NONE",
-        todayDate: formatDateKey(today),
+        todayDate: formatDateKey(targetDay),
         todayDriveFolderId: todayUpload?.driveFolderId ?? null,
         lastUploadAt: todayUpload?.updatedAt ?? null,
         hasAlert: store.alerts.length > 0,

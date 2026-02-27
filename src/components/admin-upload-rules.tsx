@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type ManagerRole = "SUPERADMIN" | "CLUSTER";
 type Requirement = "NONE" | "PHOTO" | "VIDEO" | "BOTH";
-type Scope = "global" | "store";
+type Scope = "global" | "cluster" | "store";
 
 type RuleItem = {
   weekday: number;
@@ -16,6 +16,7 @@ type RulesResponse = {
   item: {
     scope: "global" | "cluster" | "store";
     storeId: string | null;
+    clusterId: string | null;
     rules: RuleItem[];
   };
   stores: Array<{
@@ -23,6 +24,11 @@ type RulesResponse = {
     storeCode: string;
     name: string;
     clusterId: string | null;
+  }>;
+  clusters: Array<{
+    id: string;
+    code: string;
+    name: string;
   }>;
 };
 
@@ -43,9 +49,11 @@ function flagsFromRequirement(requirement: Requirement) {
 }
 
 export function AdminUploadRules(props: { managerRole: ManagerRole; managerClusterId: string | null }) {
-  const [scope, setScope] = useState<Scope>(props.managerRole === "SUPERADMIN" ? "global" : "store");
+  const [scope, setScope] = useState<Scope>(props.managerRole === "SUPERADMIN" ? "global" : "cluster");
   const [storeId, setStoreId] = useState("");
+  const [clusterId, setClusterId] = useState(props.managerClusterId || "");
   const [stores, setStores] = useState<RulesResponse["stores"]>([]);
+  const [clusters, setClusters] = useState<RulesResponse["clusters"]>([]);
   const [rules, setRules] = useState<RuleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -62,16 +70,20 @@ export function AdminUploadRules(props: { managerRole: ManagerRole; managerClust
 
   const canEditGlobal = props.managerRole === "SUPERADMIN";
 
-  const load = async (forced?: { scope?: Scope; storeId?: string }) => {
+  const load = async (forced?: { scope?: Scope; storeId?: string; clusterId?: string }) => {
     setLoading(true);
     setError(null);
     try {
       const targetScope = forced?.scope ?? scope;
       const targetStoreId = forced?.storeId ?? storeId;
+      const targetClusterId = forced?.clusterId ?? clusterId;
       const params = new URLSearchParams();
       params.set("scope", targetScope);
       if (targetScope === "store" && targetStoreId) {
         params.set("storeId", targetStoreId);
+      }
+      if (targetScope === "cluster" && targetClusterId) {
+        params.set("clusterId", targetClusterId);
       }
       const response = await fetch(`/api/admin/upload-rules?${params.toString()}`, { cache: "no-store" });
       const json = (await response.json()) as RulesResponse & { error?: string };
@@ -81,10 +93,19 @@ export function AdminUploadRules(props: { managerRole: ManagerRole; managerClust
       }
 
       setStores(json.stores || []);
+      setClusters(json.clusters || []);
       setRules(json.item.rules || []);
       if (json.item.scope === "store") {
         setScope("store");
         setStoreId(json.item.storeId || (json.stores[0]?.id ?? ""));
+      } else if (json.item.scope === "cluster") {
+        setScope("cluster");
+        setClusterId(
+          json.item.clusterId ||
+            props.managerClusterId ||
+            json.clusters?.[0]?.id ||
+            ""
+        );
       } else {
         setScope("global");
         if (!storeId && json.stores.length > 0) {
@@ -99,7 +120,7 @@ export function AdminUploadRules(props: { managerRole: ManagerRole; managerClust
   };
 
   useEffect(() => {
-    void load({ scope: scope, storeId: storeId || undefined });
+    void load({ scope, storeId: storeId || undefined, clusterId: clusterId || undefined });
   }, []);
 
   const setRuleByWeekday = (weekday: number, patch: Partial<{ photo: boolean; video: boolean }>) => {
@@ -130,6 +151,7 @@ export function AdminUploadRules(props: { managerRole: ManagerRole; managerClust
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           scope,
+          clusterId: scope === "cluster" ? clusterId : undefined,
           storeId: scope === "store" ? storeId : undefined,
           rules: rules.map((rule) => ({ weekday: rule.weekday, requirement: rule.requirement }))
         })
@@ -175,6 +197,10 @@ export function AdminUploadRules(props: { managerRole: ManagerRole; managerClust
                 setScope(nextScope);
                 if (nextScope === "global") {
                   void load({ scope: "global" });
+                } else if (nextScope === "cluster") {
+                  const fallbackClusterId = clusterId || props.managerClusterId || clusters[0]?.id || "";
+                  setClusterId(fallbackClusterId);
+                  void load({ scope: "cluster", clusterId: fallbackClusterId });
                 } else {
                   const fallbackStoreId = storeId || stores[0]?.id || "";
                   setStoreId(fallbackStoreId);
@@ -183,9 +209,32 @@ export function AdminUploadRules(props: { managerRole: ManagerRole; managerClust
               }}
             >
               {canEditGlobal ? <option value="global">Global (todas)</option> : null}
+              <option value="cluster">Global por cluster</option>
               <option value="store">Individual por tienda</option>
             </select>
           </label>
+
+          {scope === "cluster" ? (
+            <label className="space-y-1">
+              <span className="text-xs text-muted">Cluster</span>
+              <select
+                className="input"
+                value={clusterId}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setClusterId(value);
+                  void load({ scope: "cluster", clusterId: value });
+                }}
+                disabled={props.managerRole !== "SUPERADMIN"}
+              >
+                {(props.managerRole === "SUPERADMIN" ? clusters : clusters.filter((cluster) => cluster.id === props.managerClusterId)).map((cluster) => (
+                  <option key={cluster.id} value={cluster.id}>
+                    {cluster.code} · {cluster.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
           {scope === "store" ? (
             <label className="space-y-1">
@@ -208,7 +257,9 @@ export function AdminUploadRules(props: { managerRole: ManagerRole; managerClust
             </label>
           ) : (
             <div className="rounded-xl border border-line bg-slate-50 px-3 py-2 text-sm text-muted">
-              El esquema global aplica a todas las tiendas sin configuración individual.
+              {scope === "global"
+                ? "El esquema global aplica a todas las tiendas sin configuración individual."
+                : "El esquema del cluster aplica a sus tiendas sin configuración individual."}
             </div>
           )}
         </div>
@@ -263,7 +314,10 @@ export function AdminUploadRules(props: { managerRole: ManagerRole; managerClust
         {message ? <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-success">{message}</p> : null}
         {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p> : null}
 
-        <button disabled={saving || loading || (scope === "global" && !canEditGlobal)} className="btn-primary h-11 w-full disabled:opacity-60">
+        <button
+          disabled={saving || loading || (scope === "global" && !canEditGlobal)}
+          className="btn-primary h-11 w-full disabled:opacity-60"
+        >
           {saving ? "Guardando..." : "Guardar reglas"}
         </button>
       </form>

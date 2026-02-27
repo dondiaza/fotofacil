@@ -72,7 +72,8 @@ export async function GET(request: Request) {
           },
           select: {
             id: true,
-            validatedAt: true
+            validatedAt: true,
+            createdAt: true
           }
         }
       }
@@ -128,6 +129,13 @@ export async function GET(request: Request) {
       (acc, day) => acc + day.files.filter((file) => Boolean(file.validatedAt)).length,
       0
     );
+    const sentOutOfDateDays = days.filter((day) => {
+      if (!day.isSent || day.files.length === 0) {
+        return false;
+      }
+      const target = formatDateKey(day.date);
+      return day.files.some((file) => formatDateKey(file.createdAt) !== target);
+    }).length;
 
     items.push({
       storeId: store.id,
@@ -138,6 +146,7 @@ export async function GET(request: Request) {
       weekEnd: formatDateKey(addDays(weekStart, 6)),
       requiredDays,
       sentDays,
+      sentOutOfDateDays,
       validatedFiles,
       totalFiles,
       incidents: unresolvedMap.get(store.id) || 0

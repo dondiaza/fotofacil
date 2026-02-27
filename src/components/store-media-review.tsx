@@ -108,6 +108,8 @@ export function StoreMediaReview() {
   const [replacing, setReplacing] = useState(false);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const viewerRef = useRef<HTMLDivElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const [overlayBox, setOverlayBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
   const files = payload?.uploadDay?.files || [];
   const activeFile = galleryIndex === null ? null : files[galleryIndex] || null;
@@ -202,24 +204,58 @@ export function StoreMediaReview() {
     setNewThreadText("");
     setReplaceFile(null);
     setSelectedVersionId(file.id);
+    setOverlayBox(null);
     void loadThreads(file);
   };
 
   const closeGallery = () => {
     setGalleryIndex(null);
+    setSelectedVersionId(null);
+    setOverlayBox(null);
     setThreads([]);
   };
 
+  const syncOverlayBox = () => {
+    const viewer = viewerRef.current;
+    const image = imageRef.current;
+    if (!viewer || !image || !activeVersion || activeVersion.kind !== "PHOTO") {
+      setOverlayBox(null);
+      return;
+    }
+    const viewerRect = viewer.getBoundingClientRect();
+    const imageRect = image.getBoundingClientRect();
+    if (imageRect.width <= 0 || imageRect.height <= 0) {
+      setOverlayBox(null);
+      return;
+    }
+    setOverlayBox({
+      left: imageRect.left - viewerRect.left + viewer.scrollLeft,
+      top: imageRect.top - viewerRect.top + viewer.scrollTop,
+      width: imageRect.width,
+      height: imageRect.height
+    });
+  };
+
+  useEffect(() => {
+    syncOverlayBox();
+    const onResize = () => syncOverlayBox();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [activeVersion?.id, drawMode]);
+
   const pointerNorm = (event: React.PointerEvent<HTMLDivElement>) => {
-    const rect = viewerRef.current?.getBoundingClientRect();
+    const rect = imageRef.current?.getBoundingClientRect();
     if (!rect) return null;
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) {
+      return null;
+    }
     const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
     const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
     return { x, y };
   };
 
   const onDrawDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!drawMode || !activeFile || activeFile.kind !== "PHOTO") return;
+    if (!drawMode || !activeFile || !activeVersion || activeVersion.kind !== "PHOTO") return;
     const p = pointerNorm(event);
     if (!p) return;
     event.preventDefault();
@@ -442,16 +478,21 @@ export function StoreMediaReview() {
                   {replacing ? "Subiendo..." : replaceFile ? "Enviar versión" : "Selecciona archivo"}
                 </button>
               </div>
-              {activeFile.versions.length > 1 ? (
-                <div className="mb-2 flex gap-2 overflow-x-auto">
-                  {activeFile.versions.map((version) => (
-                    <button
-                      key={version.id}
-                      onClick={() => setSelectedVersionId(version.id)}
-                      className={`shrink-0 rounded-lg border px-2 py-1 text-xs font-semibold ${
-                        selectedVersionId === version.id ? "border-primary bg-sky-50 text-primary" : "border-line bg-white text-muted"
-                      }`}
-                    >
+                {activeFile.versions.length > 1 ? (
+                  <div className="mb-2 flex gap-2 overflow-x-auto">
+                    {activeFile.versions.map((version) => (
+                      <button
+                        key={version.id}
+                        onClick={() => {
+                          setSelectedVersionId(version.id);
+                          setDrawPathDraft([]);
+                          setDrawing(false);
+                          setTimeout(syncOverlayBox, 0);
+                        }}
+                        className={`shrink-0 rounded-lg border px-2 py-1 text-xs font-semibold ${
+                          selectedVersionId === version.id ? "border-primary bg-sky-50 text-primary" : "border-line bg-white text-muted"
+                        }`}
+                      >
                       V{version.versionNumber}
                     </button>
                   ))}
@@ -467,7 +508,13 @@ export function StoreMediaReview() {
                 onPointerLeave={onDrawUp}
               >
                 {activeVersion?.kind === "PHOTO" ? (
-                  <img src={`https://drive.google.com/thumbnail?id=${activeVersion.driveFileId}&sz=w2000`} alt={activeVersion.finalFilename} className="mx-auto max-h-[75vh] w-auto object-contain" />
+                  <img
+                    ref={imageRef}
+                    onLoad={syncOverlayBox}
+                    src={`https://drive.google.com/thumbnail?id=${activeVersion.driveFileId}&sz=w2000`}
+                    alt={activeVersion.finalFilename}
+                    className="mx-auto max-h-[75vh] w-auto object-contain"
+                  />
                 ) : (
                   <video controls className="mx-auto max-h-[75vh] w-full"><source src={activeVersion?.downloadUrl || activeFile.downloadUrl} type={activeVersion?.mimeType || activeFile.mimeType} /></video>
                 )}
@@ -476,11 +523,25 @@ export function StoreMediaReview() {
                     if (msg.fileVersionNumber === null || msg.fileVersionNumber !== activeVersion?.versionNumber) {
                       return null;
                     }
+                    if (!overlayBox) {
+                      return null;
+                    }
                     const points = splitDrawAnnotation(msg.text).points;
                     const d = pointsToSvgPath(points);
                     if (!d) return null;
                     return (
-                      <svg key={`path-${thread.id}-${msg.id}`} viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
+                      <svg
+                        key={`path-${thread.id}-${msg.id}`}
+                        viewBox="0 0 100 100"
+                        preserveAspectRatio="none"
+                        className="pointer-events-none absolute"
+                        style={{
+                          left: overlayBox.left,
+                          top: overlayBox.top,
+                          width: overlayBox.width,
+                          height: overlayBox.height
+                        }}
+                      >
                         <path
                           d={d}
                           fill="none"
@@ -493,8 +554,18 @@ export function StoreMediaReview() {
                     );
                   })
                 )}
-                {drawPathDraft.length >= 2 ? (
-                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
+                {drawPathDraft.length >= 2 && overlayBox ? (
+                  <svg
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    className="pointer-events-none absolute"
+                    style={{
+                      left: overlayBox.left,
+                      top: overlayBox.top,
+                      width: overlayBox.width,
+                      height: overlayBox.height
+                    }}
+                  >
                     <path d={pointsToSvgPath(drawPathDraft)} fill="none" stroke="#0f6cbd" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 ) : null}
@@ -522,8 +593,20 @@ export function StoreMediaReview() {
                     <div className="space-y-1">
                       {thread.messages.map((msg) => (
                         <div key={msg.id} className="rounded-lg bg-slate-100 px-2 py-1">
-                          <p className="text-[11px] font-semibold text-muted">{roleLabel(msg.authorRole)} · {new Date(msg.createdAt).toLocaleString()} {msg.fileVersionNumber ? `· V${msg.fileVersionNumber}` : ""}</p>
-                          <p className="whitespace-pre-wrap text-sm">{splitDrawAnnotation(msg.text).cleanText}</p>
+                          {(() => {
+                            const parsed = splitDrawAnnotation(msg.text);
+                            return (
+                              <>
+                                <p className="text-[11px] font-semibold text-muted">
+                                  {roleLabel(msg.authorRole)} · {new Date(msg.createdAt).toLocaleString()} {msg.fileVersionNumber ? `· V${msg.fileVersionNumber}` : ""}
+                                </p>
+                                {parsed.points.length >= 2 ? (
+                                  <p className="text-[11px] font-semibold text-primary">Anotación dibujada vinculada a este comentario</p>
+                                ) : null}
+                                <p className="whitespace-pre-wrap text-sm">{parsed.cleanText}</p>
+                              </>
+                            );
+                          })()}
                         </div>
                       ))}
                     </div>

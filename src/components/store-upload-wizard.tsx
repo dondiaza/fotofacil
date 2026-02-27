@@ -33,15 +33,16 @@ type DayView = {
   isSent: boolean;
   requirementKind: "NONE" | "PHOTO" | "VIDEO" | "BOTH";
   missingKinds: Kind[];
+  missingSlots: string[];
   photoCount: number;
   videoCount: number;
   driveFolderId: string | null;
   slots: DaySlot[];
 };
 
-function dateOffset(daysBack: number) {
+function dateOffset(daysDelta: number) {
   const date = new Date();
-  date.setDate(date.getDate() - daysBack);
+  date.setDate(date.getDate() + daysDelta);
   return date.toISOString().slice(0, 10);
 }
 
@@ -66,24 +67,43 @@ async function parseJson(response: Response) {
 
 function requirementMessage(dayView: DayView, queue: QueueItem[]) {
   const pending = queue.filter((item) => item.state !== "error");
-  const pendingPhotos = pending.filter((item) => item.kind === "PHOTO").length;
+  const pendingPhotos = pending.filter((item) => item.kind === "PHOTO");
   const pendingVideos = pending.filter((item) => item.kind === "VIDEO").length;
+  const pendingSlotMap = pendingPhotos.reduce<Record<string, number>>((acc, item) => {
+    const key = item.slotName.toUpperCase();
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
 
-  const effectivePhotos = dayView.photoCount + pendingPhotos;
+  const effectivePhotos = dayView.photoCount + pendingPhotos.length;
   const effectiveVideos = dayView.videoCount + pendingVideos;
+  const requiredSlots = dayView.slots.filter((slot) => slot.required).map((slot) => slot.name.toUpperCase());
+  const missingSlots = requiredSlots.filter((slotName) => {
+    const currentSlot = dayView.slots.find((slot) => slot.name.toUpperCase() === slotName);
+    const currentCount = currentSlot?.count || 0;
+    const queuedCount = pendingSlotMap[slotName] || 0;
+    return currentCount + queuedCount < 1;
+  });
+  const photoComplete = requiredSlots.length > 0 ? missingSlots.length === 0 : effectivePhotos > 0;
 
-  if (dayView.requirementKind === "PHOTO" && effectivePhotos < 1) {
-    return "Hoy se requiere al menos 1 foto para completar el envío.";
+  if (dayView.requirementKind === "PHOTO" && !photoComplete) {
+    return missingSlots.length > 0
+      ? `Falta al menos 1 foto en: ${missingSlots.join(", ")}.`
+      : "Hoy se requiere al menos 1 foto para completar el envío.";
   }
   if (dayView.requirementKind === "VIDEO" && effectiveVideos < 1) {
     return "Hoy se requiere al menos 1 vídeo para completar el envío.";
   }
   if (dayView.requirementKind === "BOTH") {
-    if (effectivePhotos < 1 && effectiveVideos < 1) {
-      return "Hoy se requiere al menos 1 foto y 1 vídeo.";
+    if (!photoComplete && effectiveVideos < 1) {
+      return missingSlots.length > 0
+        ? `Faltan fotos en ${missingSlots.join(", ")} y al menos 1 vídeo.`
+        : "Hoy se requiere al menos 1 foto y 1 vídeo.";
     }
-    if (effectivePhotos < 1) {
-      return "Falta al menos 1 foto para completar hoy.";
+    if (!photoComplete) {
+      return missingSlots.length > 0
+        ? `Faltan fotos en: ${missingSlots.join(", ")}.`
+        : "Falta al menos 1 foto para completar hoy.";
     }
     if (effectiveVideos < 1) {
       return "Falta al menos 1 vídeo para completar hoy.";
@@ -113,7 +133,6 @@ export function StoreUploadWizard() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [guidedMode, setGuidedMode] = useState(true);
-  const [additionalIndex, setAdditionalIndex] = useState(1);
 
   const loadDay = async (date: string) => {
     setLoading(true);
@@ -175,7 +194,11 @@ export function StoreUploadWizard() {
     return null;
   }, [requiredSlots, queuedPhotoCountsBySlot]);
 
-  const nextPhotoLabel = nextRequiredSlot || `ADICIONAL_${String(additionalIndex).padStart(2, "0")}`;
+  const additionalGroupName = useMemo(
+    () => requiredSlots.find((slot) => slot.name === "GENERAL")?.name || requiredSlots[0]?.name || "GENERAL",
+    [requiredSlots]
+  );
+  const nextPhotoLabel = nextRequiredSlot || additionalGroupName;
 
   const removeFromQueue = (id: string) => {
     setQueue((prev) => {
@@ -220,7 +243,6 @@ export function StoreUploadWizard() {
       existingCounts[key] = (existingCounts[key] || 0) + queuedPhotoCountsBySlot[key];
     }
 
-    let nextAdditional = additionalIndex;
     const additions: QueueItem[] = [];
     for (const file of Array.from(files)) {
       let slotName = "";
@@ -231,14 +253,12 @@ export function StoreUploadWizard() {
         }
       }
       if (!slotName) {
-        slotName = `ADICIONAL_${String(nextAdditional).padStart(2, "0")}`;
-        nextAdditional += 1;
+        slotName = additionalGroupName;
       }
       existingCounts[slotName] = (existingCounts[slotName] || 0) + 1;
       additions.push(buildQueueItem(file, "PHOTO", slotName));
     }
 
-    setAdditionalIndex(nextAdditional);
     setQueue((prev) => [...prev, ...additions]);
   };
 
@@ -350,7 +370,11 @@ export function StoreUploadWizard() {
               : refreshedJson.requirementKind === "VIDEO"
                 ? "vídeo"
                 : "contenido";
-        setError(`Subida finalizada, pero hoy sigue incompleto: falta ${requiredText}.`);
+        const missingSlotsText =
+          refreshedJson.missingSlots && refreshedJson.missingSlots.length > 0
+            ? ` (${refreshedJson.missingSlots.join(", ")})`
+            : "";
+        setError(`Subida finalizada, pero hoy sigue incompleto: falta ${requiredText}${missingSlotsText}.`);
       }
     } finally {
       setSending(false);
@@ -378,11 +402,11 @@ export function StoreUploadWizard() {
             type="date"
             className="input max-w-[190px]"
             value={dateKey}
-            max={dateOffset(0)}
-            min={dateOffset(7)}
+            max={dateOffset(7)}
+            min={dateOffset(-7)}
             onChange={(event) => setDateKey(event.target.value)}
           />
-          <span className="text-xs text-muted">Ventana de 7 días</span>
+          <span className="text-xs text-muted">Ventana de 7 días atrás y 7 días adelante</span>
         </div>
       </article>
 
@@ -406,7 +430,7 @@ export function StoreUploadWizard() {
                 Captura en orden de requeridas. Cuando completes todas, las nuevas quedarán como adicionales.
               </p>
             ) : (
-              <p className="text-xs text-muted">Requeridas completas. Puedes seguir capturando fotos adicionales.</p>
+              <p className="text-xs text-muted">Requeridas completas. Las nuevas se asignarán a {additionalGroupName}.</p>
             )}
             <div className="flex flex-wrap gap-2">
               <label className="btn-primary h-10 cursor-pointer px-3 text-xs">

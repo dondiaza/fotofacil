@@ -26,7 +26,7 @@ export default async function StoreMessagesPage() {
           { href: "/store/messages", label: unread ? `Mensajes (${unread})` : "Mensajes" }
         ]}
       />
-      <ChatPanel storeId={store.id} currentRole="STORE" title="Chat con Superadmin" />
+      <ChatPanel storeId={store.id} currentRole="STORE" title="Chat con Cluster" receiverLabel="CLUSTER" />
     </main>
   );
 }

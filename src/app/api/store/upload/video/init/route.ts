@@ -10,6 +10,7 @@ import { extFromFilename } from "@/lib/upload";
 import { signJwt } from "@/lib/jwt";
 
 const MAX_DAYS_BACK = 7;
+const MAX_DAYS_FUTURE = 7;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const payloadSchema = z.object({
@@ -23,8 +24,8 @@ const payloadSchema = z.object({
 
 function dateIsWithinWindow(day: Date) {
   const today = toDayStart(new Date());
-  const diff = Math.floor((today.getTime() - day.getTime()) / MS_PER_DAY);
-  return diff >= 0 && diff <= MAX_DAYS_BACK;
+  const diff = Math.floor((day.getTime() - today.getTime()) / MS_PER_DAY);
+  return diff >= -MAX_DAYS_BACK && diff <= MAX_DAYS_FUTURE;
 }
 
 function normalizeSlotName(raw: string | undefined) {
@@ -53,7 +54,7 @@ export async function POST(request: Request) {
     }
 
     if (!dateIsWithinWindow(uploadDate)) {
-      return badRequest("date must be within the last 7 days");
+      return badRequest("date must be within +/-7 days from today");
     }
 
     const uploadDay = await getOrCreateUploadDay(auth.store.id, auth.store.clusterId ?? null, uploadDate);

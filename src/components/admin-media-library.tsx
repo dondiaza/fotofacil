@@ -26,6 +26,18 @@ type MediaFile = {
   unreadThreadCount: number;
   thumbUrl: string | null;
   downloadUrl: string;
+  versions: Array<{
+    id: string;
+    versionNumber: number;
+    kind: "PHOTO" | "VIDEO";
+    finalFilename: string;
+    mimeType: string;
+    driveFileId: string;
+    bytes: number;
+    createdAt: string;
+    thumbUrl: string | null;
+    downloadUrl: string;
+  }>;
 };
 
 type UploadDayPayload = {
@@ -102,10 +114,12 @@ export function AdminMediaLibrary() {
 
   const [activeFilters, setActiveFilters] = useState<Set<FilterId>>(new Set());
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [threads, setThreads] = useState<ThreadItem[]>([]);
   const [threadsError, setThreadsError] = useState<string | null>(null);
   const [threadsLoading, setThreadsLoading] = useState(false);
   const [busyValidateId, setBusyValidateId] = useState<string | null>(null);
+  const [busyValidateAll, setBusyValidateAll] = useState(false);
   const [showUnreadPopup, setShowUnreadPopup] = useState(false);
 
   const [drawMode, setDrawMode] = useState(false);
@@ -114,6 +128,8 @@ export function AdminMediaLibrary() {
   const [newThreadText, setNewThreadText] = useState("");
   const [draftByThread, setDraftByThread] = useState<Record<string, string>>({});
   const viewerRef = useRef<HTMLDivElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const [overlayBox, setOverlayBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const touchMovedRef = useRef(false);
 
@@ -160,6 +176,10 @@ export function AdminMediaLibrary() {
   }, [allFiles, payload?.uploadDay?.isSent, activeFilters]);
 
   const activeFile = galleryIndex === null ? null : filteredFiles[galleryIndex] || null;
+  const activeVersion =
+    activeFile?.versions.find((version) => version.id === selectedVersionId) ||
+    activeFile?.versions[activeFile.versions.length - 1] ||
+    null;
   const unreadFiles = allFiles.filter((file) => file.unreadThreadCount > 0);
 
   const updateFile = (fileId: string, patch: Partial<MediaFile>) => {
@@ -214,11 +234,13 @@ export function AdminMediaLibrary() {
     const file = filteredFiles[index];
     if (!file) return;
     setGalleryIndex(index);
+    setSelectedVersionId(file.id);
     setThreads([]);
     setDrawMode(false);
     setDrawPathDraft([]);
     setDrawing(false);
     setNewThreadText("");
+    setOverlayBox(null);
     void loadThreads(file.id, file.versionGroupId);
   };
 
@@ -239,16 +261,47 @@ export function AdminMediaLibrary() {
     goToGalleryIndex(galleryIndex + 1);
   };
 
+  const syncOverlayBox = () => {
+    const viewer = viewerRef.current;
+    const image = imageRef.current;
+    if (!viewer || !image || !activeVersion || activeVersion.kind !== "PHOTO") {
+      setOverlayBox(null);
+      return;
+    }
+    const viewerRect = viewer.getBoundingClientRect();
+    const imageRect = image.getBoundingClientRect();
+    if (imageRect.width <= 0 || imageRect.height <= 0) {
+      setOverlayBox(null);
+      return;
+    }
+    setOverlayBox({
+      left: imageRect.left - viewerRect.left + viewer.scrollLeft,
+      top: imageRect.top - viewerRect.top + viewer.scrollTop,
+      width: imageRect.width,
+      height: imageRect.height
+    });
+  };
+
+  useEffect(() => {
+    syncOverlayBox();
+    const onResize = () => syncOverlayBox();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [activeVersion?.id, drawMode]);
+
   const pointerNorm = (event: React.PointerEvent<HTMLDivElement>) => {
-    const rect = viewerRef.current?.getBoundingClientRect();
+    const rect = imageRef.current?.getBoundingClientRect();
     if (!rect) return null;
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) {
+      return null;
+    }
     const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
     const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
     return { x, y };
   };
 
   const onDrawDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!drawMode || !activeFile || activeFile.kind !== "PHOTO") return;
+    if (!drawMode || !activeFile || !activeVersion || activeVersion.kind !== "PHOTO") return;
     const p = pointerNorm(event);
     if (!p) return;
     event.preventDefault();
@@ -323,8 +376,9 @@ export function AdminMediaLibrary() {
   const onCreateThread = async (event: FormEvent) => {
     event.preventDefault();
     if (!activeFile || !newThreadText.trim()) return;
+    const linkedFileId = activeVersion?.id || activeFile.id;
     const body: Record<string, unknown> = {
-      fileId: activeFile.id,
+      fileId: linkedFileId,
       text: injectDrawAnnotation(newThreadText.trim(), drawPathDraft)
     };
     const response = await fetch("/api/media/threads", {
@@ -379,6 +433,46 @@ export function AdminMediaLibrary() {
     setBusyValidateId(null);
   };
 
+  const validateAllDay = async () => {
+    if (!payload?.uploadDay || !selectedStoreId) return;
+    setBusyValidateAll(true);
+    setThreadsError(null);
+    setError(null);
+    try {
+      const response = await fetch("/api/admin/media/validate-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          storeId: selectedStoreId,
+          date: payload.date,
+          validated: true
+        })
+      });
+      const json = await parseJson(response);
+      if (!response.ok) {
+        setError((json as { error?: string } | null)?.error || "No se pudo validar todo el día");
+        return;
+      }
+      setPayload((prev) => {
+        if (!prev?.uploadDay) return prev;
+        return {
+          ...prev,
+          uploadDay: {
+            ...prev.uploadDay,
+            files: prev.uploadDay.files.map((file) => ({
+              ...file,
+              validatedAt: new Date().toISOString()
+            }))
+          }
+        };
+      });
+    } catch {
+      setError("Error de conexión al validar todo");
+    } finally {
+      setBusyValidateAll(false);
+    }
+  };
+
   return (
     <section className="space-y-4">
       <article className="panel p-4">
@@ -430,6 +524,13 @@ export function AdminMediaLibrary() {
             </div>
             <div className="flex items-center gap-2">
               <StatusChip status={payload.uploadDay.status} />
+              <button
+                onClick={() => void validateAllDay()}
+                disabled={busyValidateAll || payload.uploadDay.files.length === 0}
+                className="btn-ghost h-9 px-3 text-xs disabled:opacity-60"
+              >
+                {busyValidateAll ? "Validando..." : "Validar todo"}
+              </button>
               <a className="btn-ghost h-9 px-3 text-xs" href={`/api/admin/media/pack?storeId=${selectedStoreId}&date=${payload.date}`}>Descargar pack</a>
               {payload.uploadDay.driveFolderId ? (
                 <a className="btn-ghost h-9 px-3 text-xs" target="_blank" rel="noreferrer" href={driveFolderLink(payload.uploadDay.driveFolderId)}>
@@ -496,8 +597,8 @@ export function AdminMediaLibrary() {
           <div className="mx-auto grid h-full max-w-7xl gap-3 lg:grid-cols-[1fr_420px]">
             <article className="flex min-h-0 flex-col rounded-xl bg-white p-3">
               <div className="mb-2 flex items-center justify-between">
-                <p className="truncate text-sm font-semibold">{activeFile.finalFilename}</p>
-                <button onClick={() => setGalleryIndex(null)} className="btn-ghost h-8 px-2 text-xs">Cerrar</button>
+                <p className="truncate text-sm font-semibold">{activeVersion?.finalFilename || activeFile.finalFilename}</p>
+                <button onClick={() => { setGalleryIndex(null); setSelectedVersionId(null); setOverlayBox(null); }} className="btn-ghost h-8 px-2 text-xs">Cerrar</button>
               </div>
               <div className="mb-2 flex items-center justify-between gap-2">
                 <button
@@ -534,6 +635,26 @@ export function AdminMediaLibrary() {
                   {activeFile.validatedAt ? "Quitar validación" : "Validar"}
                 </button>
               </div>
+              {activeFile.versions.length > 1 ? (
+                <div className="mb-2 flex gap-2 overflow-x-auto">
+                  {activeFile.versions.map((version) => (
+                    <button
+                      key={version.id}
+                      onClick={() => {
+                        setSelectedVersionId(version.id);
+                        setDrawPathDraft([]);
+                        setDrawing(false);
+                        setTimeout(syncOverlayBox, 0);
+                      }}
+                      className={`shrink-0 rounded-lg border px-2 py-1 text-xs font-semibold ${
+                        selectedVersionId === version.id ? "border-primary bg-sky-50 text-primary" : "border-line bg-white text-muted"
+                      }`}
+                    >
+                      V{version.versionNumber}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <div
                 ref={viewerRef}
                 className={`relative min-h-0 flex-1 overflow-auto rounded-xl border border-line bg-slate-100 ${drawMode ? "cursor-crosshair touch-none" : ""}`}
@@ -545,21 +666,45 @@ export function AdminMediaLibrary() {
                 onTouchMove={onTouchMove}
                 onTouchEnd={onTouchEnd}
               >
-                {activeFile.kind === "PHOTO" ? (
-                  <img src={`https://drive.google.com/thumbnail?id=${activeFile.driveFileId}&sz=w2000`} alt={activeFile.finalFilename} className="mx-auto max-h-[75vh] w-auto object-contain" />
+                {activeVersion?.kind === "PHOTO" ? (
+                  <img
+                    ref={imageRef}
+                    onLoad={syncOverlayBox}
+                    src={`https://drive.google.com/thumbnail?id=${activeVersion.driveFileId}&sz=w2000`}
+                    alt={activeVersion.finalFilename}
+                    className="mx-auto max-h-[75vh] w-auto object-contain"
+                  />
                 ) : (
-                  <video controls className="mx-auto max-h-[75vh] w-full"><source src={activeFile.downloadUrl} type={activeFile.mimeType} /></video>
+                  <video controls className="mx-auto max-h-[75vh] w-full"><source src={activeVersion?.downloadUrl || activeFile.downloadUrl} type={activeVersion?.mimeType || activeFile.mimeType} /></video>
                 )}
                 {threads.flatMap((thread) =>
                   thread.messages.map((msg) => {
-                    if (msg.fileVersionNumber === null || msg.fileVersionNumber !== activeFile.versionNumber) {
+                    if (msg.fileVersionNumber === null || msg.fileVersionNumber !== activeVersion?.versionNumber) {
+                      return null;
+                    }
+                    if (!overlayBox) {
                       return null;
                     }
                     const points = splitDrawAnnotation(msg.text).points;
                     const d = pointsToSvgPath(points);
                     if (!d) return null;
                     return (
-                      <svg key={`path-${thread.id}-${msg.id}`} viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
+                      <svg
+                        key={`path-${thread.id}-${msg.id}`}
+                        viewBox="0 0 100 100"
+                        preserveAspectRatio="none"
+                        className="pointer-events-none absolute"
+                        style={
+                          overlayBox
+                            ? {
+                                left: overlayBox.left,
+                                top: overlayBox.top,
+                                width: overlayBox.width,
+                                height: overlayBox.height
+                              }
+                            : undefined
+                        }
+                      >
                         <path
                           d={d}
                           fill="none"
@@ -572,8 +717,18 @@ export function AdminMediaLibrary() {
                     );
                   })
                 )}
-                {drawPathDraft.length >= 2 ? (
-                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
+                {drawPathDraft.length >= 2 && overlayBox ? (
+                  <svg
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    className="pointer-events-none absolute"
+                    style={{
+                      left: overlayBox.left,
+                      top: overlayBox.top,
+                      width: overlayBox.width,
+                      height: overlayBox.height
+                    }}
+                  >
                     <path d={pointsToSvgPath(drawPathDraft)} fill="none" stroke="#0f6cbd" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 ) : null}
@@ -581,6 +736,11 @@ export function AdminMediaLibrary() {
             </article>
 
             <aside className="flex min-h-0 flex-col rounded-xl bg-white p-3">
+              {activeVersion ? (
+                <p className="mb-2 text-xs text-muted">
+                  Viendo versión V{activeVersion.versionNumber} · {new Date(activeVersion.createdAt).toLocaleString()}
+                </p>
+              ) : null}
               <form onSubmit={onCreateThread} className="mb-3 space-y-2 rounded-lg border border-line bg-slate-50 p-2">
                 <textarea className="w-full rounded-lg border border-line bg-white p-2 text-sm outline-none focus:border-primary" rows={3} value={newThreadText} onChange={(event) => setNewThreadText(event.target.value)} placeholder="Nuevo comentario del hilo..." />
                 <p className="text-[11px] text-muted">
@@ -599,8 +759,20 @@ export function AdminMediaLibrary() {
                     <div className="space-y-1">
                       {thread.messages.map((msg) => (
                         <div key={msg.id} className="rounded-lg bg-slate-100 px-2 py-1">
-                          <p className="text-[11px] font-semibold text-muted">{roleLabel(msg.authorRole)} · {new Date(msg.createdAt).toLocaleString()} {msg.fileVersionNumber ? `· V${msg.fileVersionNumber}` : ""}</p>
-                          <p className="whitespace-pre-wrap text-sm">{splitDrawAnnotation(msg.text).cleanText}</p>
+                          {(() => {
+                            const parsed = splitDrawAnnotation(msg.text);
+                            return (
+                              <>
+                                <p className="text-[11px] font-semibold text-muted">
+                                  {roleLabel(msg.authorRole)} · {new Date(msg.createdAt).toLocaleString()} {msg.fileVersionNumber ? `· V${msg.fileVersionNumber}` : ""}
+                                </p>
+                                {parsed.points.length >= 2 ? (
+                                  <p className="text-[11px] font-semibold text-primary">Anotación dibujada vinculada a este comentario</p>
+                                ) : null}
+                                <p className="whitespace-pre-wrap text-sm">{parsed.cleanText}</p>
+                              </>
+                            );
+                          })()}
                         </div>
                       ))}
                     </div>

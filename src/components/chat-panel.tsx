@@ -16,9 +16,10 @@ type ChatPanelProps = {
   storeId: string;
   currentRole: Role;
   title?: string;
+  receiverLabel?: string;
 };
 
-export function ChatPanel({ storeId, currentRole, title }: ChatPanelProps) {
+export function ChatPanel({ storeId, currentRole, title, receiverLabel }: ChatPanelProps) {
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -115,7 +116,10 @@ export function ChatPanel({ storeId, currentRole, title }: ChatPanelProps) {
   return (
     <section className="panel p-4">
       <div className="mb-2 flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">{title || "Mensajes"}</p>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">{title || "Mensajes"}</p>
+          {receiverLabel ? <p className="text-[11px] text-muted">Receptor: {receiverLabel}</p> : null}
+        </div>
         <button onClick={() => void refresh()} className="text-xs font-semibold text-primary hover:underline">
           Actualizar
         </button>
@@ -143,6 +147,7 @@ export function ChatPanel({ storeId, currentRole, title }: ChatPanelProps) {
               <p className="mb-1 text-[11px] font-semibold opacity-80">
                 {msg.fromRole === "STORE" ? "Tienda" : msg.fromRole === "CLUSTER" ? "Cluster" : "Admin"}
               </p>
+              <p className="mb-1 text-[11px] opacity-75">{new Date(msg.createdAt).toLocaleString()}</p>
               {msg.text ? <p className="whitespace-pre-wrap">{msg.text}</p> : null}
               {msg.attachmentWebViewLink ? (
                 <a

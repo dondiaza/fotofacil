@@ -90,8 +90,46 @@ export async function GET(request: Request) {
   let unreadByVersionGroup: Record<string, number> = {};
   let threadCountByVersionGroup: Record<string, number> = {};
 
+  let versionsByGroup: Record<
+    string,
+    Array<{
+      id: string;
+      versionNumber: number;
+      kind: "PHOTO" | "VIDEO";
+      finalFilename: string;
+      mimeType: string;
+      driveFileId: string;
+      bytes: number;
+      createdAt: Date;
+    }>
+  > = {};
+
   if (uploadDay && uploadDay.files.length > 0) {
     const groups = [...new Set(uploadDay.files.map((file) => file.versionGroupId))];
+    const allVersions = await prisma.uploadFile.findMany({
+      where: {
+        uploadDayId: uploadDay.id,
+        versionGroupId: { in: groups }
+      },
+      orderBy: [{ versionGroupId: "asc" }, { versionNumber: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        versionGroupId: true,
+        versionNumber: true,
+        kind: true,
+        finalFilename: true,
+        mimeType: true,
+        driveFileId: true,
+        bytes: true,
+        createdAt: true
+      }
+    });
+    versionsByGroup = allVersions.reduce<Record<string, typeof allVersions>>((acc, version) => {
+      acc[version.versionGroupId] ??= [];
+      acc[version.versionGroupId].push(version);
+      return acc;
+    }, {});
+
     const threads = await prisma.mediaThread.findMany({
       where: {
         storeId: selectedStoreId,
@@ -141,7 +179,19 @@ export async function GET(request: Request) {
             thumbUrl: file.kind === "PHOTO" ? `https://drive.google.com/thumbnail?id=${file.driveFileId}` : null,
             downloadUrl: `/api/admin/media/file/${file.id}/download`,
             threadCount: threadCountByVersionGroup[file.versionGroupId] || 0,
-            unreadThreadCount: unreadByVersionGroup[file.versionGroupId] || 0
+            unreadThreadCount: unreadByVersionGroup[file.versionGroupId] || 0,
+            versions: (versionsByGroup[file.versionGroupId] || []).map((entry) => ({
+              id: entry.id,
+              versionNumber: entry.versionNumber,
+              kind: entry.kind,
+              finalFilename: entry.finalFilename,
+              mimeType: entry.mimeType,
+              driveFileId: entry.driveFileId,
+              bytes: entry.bytes,
+              createdAt: entry.createdAt,
+              thumbUrl: entry.kind === "PHOTO" ? `https://drive.google.com/thumbnail?id=${entry.driveFileId}` : null,
+              downloadUrl: `/api/admin/media/file/${entry.id}/download`
+            }))
           }))
         }
       : null

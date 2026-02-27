@@ -5,21 +5,6 @@ import { formatDateKey, toDayStart } from "@/lib/date";
 import { evaluateDaySent, getRequirementForStoreDate } from "@/lib/upload-requirements";
 
 export async function getEffectiveSlots(storeId: string) {
-  const storeSlots = await prisma.slotTemplate.findMany({
-    where: { storeId },
-    select: {
-      id: true,
-      name: true,
-      required: true,
-      order: true,
-      allowMultiple: true
-    }
-  });
-
-  if (storeSlots.length > 0) {
-    return sortSlots(storeSlots);
-  }
-
   const globalSlots = await prisma.slotTemplate.findMany({
     where: { storeId: null },
     select: {
@@ -31,7 +16,22 @@ export async function getEffectiveSlots(storeId: string) {
     }
   });
 
-  return sortSlots(globalSlots);
+  if (globalSlots.length > 0) {
+    return sortSlots(globalSlots);
+  }
+
+  const storeSlots = await prisma.slotTemplate.findMany({
+    where: { storeId },
+    select: {
+      id: true,
+      name: true,
+      required: true,
+      order: true,
+      allowMultiple: true
+    }
+  });
+
+  return sortSlots(storeSlots);
 }
 
 export async function getOrCreateUploadDay(storeId: string, clusterId: string | null, date: Date) {
@@ -64,9 +64,15 @@ export async function refreshUploadDayStatus(uploadDayId: string) {
   const uploadDay = await prisma.uploadDay.findUnique({
     where: { id: uploadDayId },
     include: {
+      store: {
+        select: {
+          id: true
+        }
+      },
       files: {
         select: {
           kind: true,
+          slotName: true,
           isCurrentVersion: true
         }
       }
@@ -77,7 +83,9 @@ export async function refreshUploadDayStatus(uploadDayId: string) {
     return null;
   }
 
-  const evalResult = evaluateDaySent(uploadDay.requirementKind, uploadDay.files);
+  const effectiveSlots = await getEffectiveSlots(uploadDay.store.id);
+  const requiredSlotNames = effectiveSlots.filter((slot) => slot.required).map((slot) => slot.name);
+  const evalResult = evaluateDaySent(uploadDay.requirementKind, uploadDay.files, requiredSlotNames);
   const completedAt = evalResult.isSent ? uploadDay.completedAt ?? new Date() : null;
 
   return prisma.uploadDay.update({
@@ -99,7 +107,10 @@ export async function getStoreDayView(storeId: string, clusterId: string | null,
     orderBy: { createdAt: "desc" }
   });
 
-  const fileBySlot = files.reduce<Record<string, (typeof files)[number][]>>((acc, item) => {
+  const photoBySlot = files.reduce<Record<string, (typeof files)[number][]>>((acc, item) => {
+    if (item.kind !== "PHOTO") {
+      return acc;
+    }
     acc[item.slotName] ??= [];
     acc[item.slotName].push(item);
     return acc;
@@ -110,14 +121,15 @@ export async function getStoreDayView(storeId: string, clusterId: string | null,
     required: slot.required,
     allowMultiple: slot.allowMultiple,
     order: slot.order,
-    done: Boolean(fileBySlot[slot.name]?.length),
-    count: fileBySlot[slot.name]?.length ?? 0,
-    preview: fileBySlot[slot.name]?.[0]?.driveFileId
-      ? `https://drive.google.com/thumbnail?id=${fileBySlot[slot.name][0].driveFileId}`
+    done: Boolean(photoBySlot[slot.name]?.length),
+    count: photoBySlot[slot.name]?.length ?? 0,
+    preview: photoBySlot[slot.name]?.[0]?.driveFileId
+      ? `https://drive.google.com/thumbnail?id=${photoBySlot[slot.name][0].driveFileId}`
       : null
   }));
 
-  const evalResult = evaluateDaySent(uploadDay.requirementKind, files);
+  const requiredSlotNames = slotChecks.filter((slot) => slot.required).map((slot) => slot.name);
+  const evalResult = evaluateDaySent(uploadDay.requirementKind, files, requiredSlotNames);
   if (evalResult.status !== uploadDay.status || evalResult.isSent !== uploadDay.isSent) {
     await prisma.uploadDay.update({
       where: { id: uploadDay.id },
@@ -135,6 +147,7 @@ export async function getStoreDayView(storeId: string, clusterId: string | null,
     isSent: evalResult.isSent,
     requirementKind: uploadDay.requirementKind,
     missingKinds: evalResult.missingKinds,
+    missingSlots: evalResult.missingSlots,
     photoCount: files.filter((file) => file.kind === "PHOTO").length,
     videoCount: files.filter((file) => file.kind === "VIDEO").length,
     slots: slotChecks,

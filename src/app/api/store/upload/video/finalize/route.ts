@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireStore } from "@/lib/request-auth";
 import { refreshUploadDayStatus } from "@/lib/store-service";
 import { writeAuditLog } from "@/lib/audit";
+import { notifyClusterOnOffDateUpload } from "@/lib/offdate-upload";
 
 const payloadSchema = z.object({
   finalizeToken: z.string().min(1),
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
 
     const uploadDay = await prisma.uploadDay.findUnique({
       where: { id: token.uploadDayId },
-      select: { id: true, storeId: true }
+      select: { id: true, storeId: true, date: true }
     });
     if (!uploadDay || uploadDay.storeId !== auth.store.id) {
       return badRequest("Jornada de subida inválida");
@@ -148,6 +149,14 @@ export async function POST(request: Request) {
         versionNumber: token.versionNumber,
         mode: "resumable"
       }
+    });
+
+    await notifyClusterOnOffDateUpload({
+      storeId: auth.store.id,
+      storeCode: auth.store.storeCode,
+      storeName: auth.store.name,
+      clusterId: auth.store.clusterId ?? null,
+      uploadDate: uploadDay.date
     });
 
     return Response.json({

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { subDays } from "date-fns";
 import { AppHeader } from "@/components/app-header";
+import { StoreLoginReminderPopup } from "@/components/store-login-reminder-popup";
 import { StatusChip } from "@/components/status-chip";
 import { formatDateKey, todayDateKey } from "@/lib/date";
 import { requireStorePage } from "@/lib/page-auth";
@@ -30,6 +31,35 @@ export default async function StoreHomePage() {
       readAt: null
     }
   });
+  const loginReminders = await prisma.message.findMany({
+    where: {
+      storeId: store.id,
+      fromRole: {
+        in: ["CLUSTER", "SUPERADMIN"]
+      },
+      readAt: null,
+      text: {
+        contains: "recordatorio",
+        mode: "insensitive"
+      }
+    },
+    orderBy: {
+      createdAt: "desc"
+    },
+    take: 5,
+    select: {
+      id: true,
+      fromRole: true,
+      text: true,
+      createdAt: true
+    }
+  });
+  const reminderItems = loginReminders.map((item) => ({
+    id: item.id,
+    fromRole: item.fromRole as "CLUSTER" | "SUPERADMIN",
+    text: item.text,
+    createdAt: item.createdAt.toISOString()
+  }));
 
   return (
     <main className="app-shell">
@@ -44,6 +74,7 @@ export default async function StoreHomePage() {
           { href: "/store/messages", label: unread ? `Mensajes (${unread})` : "Mensajes" }
         ]}
       />
+      <StoreLoginReminderPopup items={reminderItems} />
 
       <section className="grid gap-3 sm:grid-cols-2">
         <article className="panel space-y-3 p-4">

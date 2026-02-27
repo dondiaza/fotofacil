@@ -4,6 +4,7 @@ import { weekdayIndex } from "@/lib/date";
 
 type FileLite = {
   kind: UploadKind;
+  slotName?: string;
   isCurrentVersion?: boolean;
 };
 
@@ -55,38 +56,64 @@ export async function getRequirementForStoreDate(storeId: string, clusterId: str
   return globalRule?.requirement ?? RequirementKind.NONE;
 }
 
-export function evaluateDaySent(requirement: RequirementKind, files: FileLite[]) {
+export function evaluateDaySent(requirement: RequirementKind, files: FileLite[], requiredSlotNames: string[] = []) {
   const currentFiles = files.filter((file) => file.isCurrentVersion !== false);
   const hasPhoto = currentFiles.some((file) => file.kind === "PHOTO");
   const hasVideo = currentFiles.some((file) => file.kind === "VIDEO");
+  const hasAny = currentFiles.length > 0;
+  const normalizedRequiredSlots = [...new Set(requiredSlotNames.map((name) => String(name || "").trim().toUpperCase()).filter(Boolean))];
+  const photoSlotSet = new Set(
+    currentFiles
+      .filter((file) => file.kind === "PHOTO")
+      .map((file) => String(file.slotName || "").trim().toUpperCase())
+      .filter(Boolean)
+  );
+
+  const requiredSlotsTotal = normalizedRequiredSlots.length;
+  const coveredRequiredSlots = normalizedRequiredSlots.filter((slotName) => photoSlotSet.has(slotName)).length;
+  const missingSlots = normalizedRequiredSlots.filter((slotName) => !photoSlotSet.has(slotName));
+  const hasAllRequiredPhotoSlots = requiredSlotsTotal === 0 ? hasPhoto : coveredRequiredSlots >= requiredSlotsTotal;
+  const partialPhotoSlots = coveredRequiredSlots > 0 || hasPhoto;
 
   if (requirement === "NONE") {
     return {
       isSent: true,
       status: UploadStatus.COMPLETE,
-      missingKinds: [] as UploadKind[]
+      missingKinds: [] as UploadKind[],
+      requiredSlotsTotal,
+      coveredRequiredSlots,
+      missingSlots: [] as string[]
     };
   }
 
   if (requirement === "PHOTO") {
+    const isSent = hasAllRequiredPhotoSlots;
+    const status = isSent ? UploadStatus.COMPLETE : partialPhotoSlots || hasPhoto ? UploadStatus.PARTIAL : UploadStatus.PENDING;
     return {
-      isSent: hasPhoto,
-      status: hasPhoto ? UploadStatus.COMPLETE : UploadStatus.PENDING,
-      missingKinds: hasPhoto ? ([] as UploadKind[]) : (["PHOTO"] as UploadKind[])
+      isSent,
+      status,
+      missingKinds: isSent ? ([] as UploadKind[]) : (["PHOTO"] as UploadKind[]),
+      requiredSlotsTotal,
+      coveredRequiredSlots,
+      missingSlots
     };
   }
 
   if (requirement === "VIDEO") {
+    const isSent = hasVideo;
     return {
-      isSent: hasVideo,
-      status: hasVideo ? UploadStatus.COMPLETE : UploadStatus.PENDING,
-      missingKinds: hasVideo ? ([] as UploadKind[]) : (["VIDEO"] as UploadKind[])
+      isSent,
+      status: isSent ? UploadStatus.COMPLETE : hasAny ? UploadStatus.PARTIAL : UploadStatus.PENDING,
+      missingKinds: isSent ? ([] as UploadKind[]) : (["VIDEO"] as UploadKind[]),
+      requiredSlotsTotal,
+      coveredRequiredSlots,
+      missingSlots: [] as string[]
     };
   }
 
-  const isSent = hasPhoto && hasVideo;
+  const isSent = hasAllRequiredPhotoSlots && hasVideo;
   const missingKinds: UploadKind[] = [];
-  if (!hasPhoto) {
+  if (!hasAllRequiredPhotoSlots) {
     missingKinds.push("PHOTO");
   }
   if (!hasVideo) {
@@ -95,8 +122,11 @@ export function evaluateDaySent(requirement: RequirementKind, files: FileLite[])
 
   return {
     isSent,
-    status: isSent ? UploadStatus.COMPLETE : UploadStatus.PENDING,
-    missingKinds
+    status: isSent ? UploadStatus.COMPLETE : hasAny || partialPhotoSlots ? UploadStatus.PARTIAL : UploadStatus.PENDING,
+    missingKinds,
+    requiredSlotsTotal,
+    coveredRequiredSlots,
+    missingSlots
   };
 }
 

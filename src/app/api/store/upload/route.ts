@@ -7,14 +7,16 @@ import { ensureStructuredUploadFolder, isDriveStorageQuotaError, uploadBufferToD
 import { extFromFilename, normalizeImageBuffer } from "@/lib/upload";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
+import { notifyClusterOnOffDateUpload } from "@/lib/offdate-upload";
 
 const MAX_DAYS_BACK = 7;
+const MAX_DAYS_FUTURE = 7;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 function dateIsWithinWindow(day: Date) {
   const today = toDayStart(new Date());
-  const diff = Math.floor((today.getTime() - day.getTime()) / MS_PER_DAY);
-  return diff >= 0 && diff <= MAX_DAYS_BACK;
+  const diff = Math.floor((day.getTime() - today.getTime()) / MS_PER_DAY);
+  return diff >= -MAX_DAYS_BACK && diff <= MAX_DAYS_FUTURE;
 }
 
 function detectKind(file: File, explicit?: string | null) {
@@ -33,7 +35,7 @@ function normalizeSlotName(raw: string | null, fallback: "PHOTO" | "VIDEO") {
   if (base) {
     return base.replace(/\s+/g, "_");
   }
-  return fallback === "VIDEO" ? "VIDEO" : "FOTO";
+  return fallback === "VIDEO" ? "VIDEO" : "GENERAL";
 }
 
 export async function POST(request: Request) {
@@ -62,7 +64,7 @@ export async function POST(request: Request) {
     }
 
     if (!dateIsWithinWindow(uploadDate)) {
-      return badRequest("date must be within the last 7 days");
+      return badRequest("date must be within +/-7 days from today");
     }
 
     const kind = detectKind(file, explicitKind ? String(explicitKind) : null);
@@ -217,6 +219,14 @@ export async function POST(request: Request) {
         versionGroupId,
         versionNumber
       }
+    });
+
+    await notifyClusterOnOffDateUpload({
+      storeId: auth.store.id,
+      storeCode: auth.store.storeCode,
+      storeName: auth.store.name,
+      clusterId: auth.store.clusterId ?? null,
+      uploadDate
     });
 
     return Response.json({

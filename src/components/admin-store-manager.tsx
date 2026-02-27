@@ -30,8 +30,7 @@ export function AdminStoreManager({ managerRole }: { managerRole: ManagerRole })
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [deadlineTime, setDeadlineTime] = useState("10:30");
-  const [slots, setSlots] = useState("ESCAPARATE_1,ESCAPARATE_2,INTERIOR_1,INTERIOR_2,CAJA");
-  const [globalSlots, setGlobalSlots] = useState("ESCAPARATE_1,ESCAPARATE_2,INTERIOR_1,INTERIOR_2,CAJA");
+  const [globalSlots, setGlobalSlots] = useState("ESCAPARATE,FACHADA,INTERIOR,CAJA,GENERAL");
 
   const load = async () => {
     setLoading(true);
@@ -61,17 +60,6 @@ export function AdminStoreManager({ managerRole }: { managerRole: ManagerRole })
     setError(null);
     setCreatedCredentials(null);
     try {
-      const parsedSlots = slots
-        .split(",")
-        .map((item) => item.trim().toUpperCase())
-        .filter(Boolean)
-        .map((item, index) => ({
-          name: item,
-          order: index + 1,
-          required: true,
-          allowMultiple: false
-        }));
-
       const response = await fetch("/api/admin/stores", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -80,8 +68,7 @@ export function AdminStoreManager({ managerRole }: { managerRole: ManagerRole })
           storeCode,
           username,
           email: email || undefined,
-          deadlineTime: deadlineTime || undefined,
-          slots: parsedSlots.length > 0 ? parsedSlots : undefined
+          deadlineTime: deadlineTime || undefined
         })
       });
 
@@ -113,11 +100,11 @@ export function AdminStoreManager({ managerRole }: { managerRole: ManagerRole })
         .map((item) => item.trim().toUpperCase())
         .filter(Boolean)
         .map((item, index) => ({
-          name: item,
-          order: index + 1,
-          required: true,
-          allowMultiple: false
-        }));
+              name: item,
+              order: index + 1,
+              required: true,
+              allowMultiple: true
+            }));
 
       const response = await fetch("/api/admin/slot-templates", {
         method: "PUT",
@@ -160,13 +147,6 @@ export function AdminStoreManager({ managerRole }: { managerRole: ManagerRole })
             />
             <input className="input" placeholder="Email (opcional)" value={email} onChange={(e) => setEmail(e.target.value)} />
             <input className="input" type="time" value={deadlineTime} onChange={(e) => setDeadlineTime(e.target.value)} />
-            <textarea
-              className="w-full rounded-xl border border-line p-3 text-sm outline-none focus:border-primary"
-              rows={4}
-              value={slots}
-              onChange={(e) => setSlots(e.target.value)}
-              placeholder="Slots separados por coma"
-            />
             {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p> : null}
             {createdCredentials ? (
               <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-success">

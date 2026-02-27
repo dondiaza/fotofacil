@@ -31,6 +31,7 @@ type KpiRow = {
   storeName: string;
   requiredDays: number;
   sentDays: number;
+  sentOutOfDateDays: number;
   validatedFiles: number;
   totalFiles: number;
   incidents: number;
@@ -62,6 +63,7 @@ export function AdminDashboard({ role }: AdminDashboardProps) {
     now.setDate(now.getDate() - day + 1);
     return now.toISOString().slice(0, 10);
   });
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [filter, setFilter] = useState<(typeof filters)[number]["id"]>("ALL");
   const [loading, setLoading] = useState(true);
   const [loadingKpis, setLoadingKpis] = useState(true);
@@ -74,7 +76,9 @@ export function AdminDashboard({ role }: AdminDashboardProps) {
     setError(null);
     try {
       const query = filter === "ALL" ? "" : `?status=${filter}`;
-      const response = await fetch(`/api/admin/stores${query}`, { cache: "no-store" });
+      const params = new URLSearchParams(query ? query.slice(1) : "");
+      params.set("date", selectedDate);
+      const response = await fetch(`/api/admin/stores?${params.toString()}`, { cache: "no-store" });
       const json = await response.json();
       if (!response.ok) {
         setError(json.error || "No se pudo cargar dashboard");
@@ -90,7 +94,7 @@ export function AdminDashboard({ role }: AdminDashboardProps) {
 
   useEffect(() => {
     void load();
-  }, [filter]);
+  }, [filter, selectedDate]);
 
   const loadClusters = async () => {
     if (role !== "SUPERADMIN") {
@@ -256,6 +260,12 @@ export function AdminDashboard({ role }: AdminDashboardProps) {
               {entry.label}
             </button>
           ))}
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(event) => setSelectedDate(event.target.value)}
+            className="input h-9 max-w-[170px]"
+          />
           <button onClick={() => void load()} className="ml-auto text-xs font-semibold text-primary hover:underline">
             Actualizar
           </button>
@@ -338,6 +348,7 @@ export function AdminDashboard({ role }: AdminDashboardProps) {
                 <tr className="text-left text-xs uppercase tracking-[0.08em] text-muted">
                   <th className="px-2 py-2">Tienda</th>
                   <th className="px-2 py-2">Enviados</th>
+                  <th className="px-2 py-2">Fuera de fecha</th>
                   <th className="px-2 py-2">Validados</th>
                   <th className="px-2 py-2">Incidencias</th>
                 </tr>
@@ -353,6 +364,7 @@ export function AdminDashboard({ role }: AdminDashboardProps) {
                     <td className="px-2 py-2">
                       {item.sentDays}/{item.requiredDays}
                     </td>
+                    <td className="px-2 py-2">{item.sentOutOfDateDays}</td>
                     <td className="px-2 py-2">
                       {item.validatedFiles}/{item.totalFiles}
                     </td>
@@ -361,7 +373,7 @@ export function AdminDashboard({ role }: AdminDashboardProps) {
                 ))}
                 {!loadingKpis && kpis.length === 0 ? (
                   <tr>
-                    <td className="px-2 py-3 text-sm text-muted" colSpan={4}>
+                    <td className="px-2 py-3 text-sm text-muted" colSpan={5}>
                       Sin datos de KPI para esa semana.
                     </td>
                   </tr>
