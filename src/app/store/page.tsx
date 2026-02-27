@@ -3,7 +3,6 @@ import { subDays } from "date-fns";
 import { AppHeader } from "@/components/app-header";
 import { StatusChip } from "@/components/status-chip";
 import { formatDateKey, todayDateKey } from "@/lib/date";
-import { driveFolderLink } from "@/lib/drive-links";
 import { requireStorePage } from "@/lib/page-auth";
 import { prisma } from "@/lib/prisma";
 import { getStoreDayView } from "@/lib/store-service";
@@ -51,16 +50,6 @@ export default async function StoreHomePage() {
           <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Estado del día</p>
           <div className="flex items-center justify-between">
             <StatusChip status={today.status} />
-            {today.driveFolderId ? (
-              <a
-                className="text-xs font-semibold text-primary hover:underline"
-                href={driveFolderLink(today.driveFolderId)}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Ver en Drive
-              </a>
-            ) : null}
           </div>
           <Link href="/store/upload" className="btn-primary h-11 w-full">
             Subir fotos del día

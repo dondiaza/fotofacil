@@ -169,11 +169,21 @@ export function ChatPanel({ storeId, currentRole, title }: ChatPanelProps) {
         />
         <div className="flex items-center gap-2">
           <label className="btn-ghost h-10 cursor-pointer px-3 text-xs">
-            Adjuntar foto
+            Foto archivo
             <input
               hidden
               type="file"
               accept="image/*"
+              onChange={(event) => setAttachment(event.target.files?.[0] || null)}
+            />
+          </label>
+          <label className="btn-ghost h-10 cursor-pointer px-3 text-xs">
+            Foto cámara
+            <input
+              hidden
+              type="file"
+              accept="image/*"
+              capture="environment"
               onChange={(event) => setAttachment(event.target.files?.[0] || null)}
             />
           </label>

@@ -10,10 +10,21 @@ type QueueItem = {
   id: string;
   file: File;
   kind: Kind;
+  slotName: string;
   previewUrl: string | null;
   state: UploadState;
   error: string | null;
   hint: string | null;
+};
+
+type DaySlot = {
+  name: string;
+  required: boolean;
+  allowMultiple: boolean;
+  order: number;
+  done: boolean;
+  count: number;
+  preview: string | null;
 };
 
 type DayView = {
@@ -25,6 +36,7 @@ type DayView = {
   photoCount: number;
   videoCount: number;
   driveFolderId: string | null;
+  slots: DaySlot[];
 };
 
 function dateOffset(daysBack: number) {
@@ -80,6 +92,19 @@ function requirementMessage(dayView: DayView, queue: QueueItem[]) {
   return null;
 }
 
+function buildQueueItem(file: File, kind: Kind, slotName: string): QueueItem {
+  return {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    file,
+    kind,
+    slotName,
+    previewUrl: kind === "PHOTO" ? URL.createObjectURL(file) : null,
+    state: "pending",
+    error: null,
+    hint: null
+  };
+}
+
 export function StoreUploadWizard() {
   const [dateKey, setDateKey] = useState(() => new Date().toISOString().slice(0, 10));
   const [dayView, setDayView] = useState<DayView | null>(null);
@@ -87,6 +112,8 @@ export function StoreUploadWizard() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [guidedMode, setGuidedMode] = useState(true);
+  const [additionalIndex, setAdditionalIndex] = useState(1);
 
   const loadDay = async (date: string) => {
     setLoading(true);
@@ -123,24 +150,32 @@ export function StoreUploadWizard() {
   const pendingItems = useMemo(() => queue.filter((item) => item.state !== "done"), [queue]);
   const missingRequirement = useMemo(() => (dayView ? requirementMessage(dayView, queue) : null), [dayView, queue]);
 
-  const addToQueue = (files: FileList | null, kind: Kind) => {
-    if (!files || files.length === 0) {
-      return;
+  const requiredSlots = useMemo(
+    () => (dayView?.slots || []).filter((slot) => slot.required).sort((a, b) => a.order - b.order),
+    [dayView]
+  );
+
+  const queuedPhotoCountsBySlot = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const item of queue) {
+      if (item.kind === "PHOTO" && item.state !== "error") {
+        counts[item.slotName] = (counts[item.slotName] || 0) + 1;
+      }
     }
-    const additions: QueueItem[] = [];
-    for (const file of Array.from(files)) {
-      additions.push({
-        id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
-        file,
-        kind,
-        previewUrl: kind === "PHOTO" ? URL.createObjectURL(file) : null,
-        state: "pending",
-        error: null,
-        hint: null
-      });
+    return counts;
+  }, [queue]);
+
+  const nextRequiredSlot = useMemo(() => {
+    for (const slot of requiredSlots) {
+      const pending = queuedPhotoCountsBySlot[slot.name] || 0;
+      if ((slot.count || 0) + pending < 1) {
+        return slot.name;
+      }
     }
-    setQueue((prev) => [...prev, ...additions]);
-  };
+    return null;
+  }, [requiredSlots, queuedPhotoCountsBySlot]);
+
+  const nextPhotoLabel = nextRequiredSlot || `ADICIONAL_${String(additionalIndex).padStart(2, "0")}`;
 
   const removeFromQueue = (id: string) => {
     setQueue((prev) => {
@@ -172,13 +207,56 @@ export function StoreUploadWizard() {
     );
   };
 
+  const addGuidedPhotos = (files: FileList | null) => {
+    if (!files || files.length === 0 || !dayView) {
+      return;
+    }
+
+    const existingCounts: Record<string, number> = {};
+    for (const slot of requiredSlots) {
+      existingCounts[slot.name] = slot.count || 0;
+    }
+    for (const key of Object.keys(queuedPhotoCountsBySlot)) {
+      existingCounts[key] = (existingCounts[key] || 0) + queuedPhotoCountsBySlot[key];
+    }
+
+    let nextAdditional = additionalIndex;
+    const additions: QueueItem[] = [];
+    for (const file of Array.from(files)) {
+      let slotName = "";
+      for (const slot of requiredSlots) {
+        if ((existingCounts[slot.name] || 0) < 1) {
+          slotName = slot.name;
+          break;
+        }
+      }
+      if (!slotName) {
+        slotName = `ADICIONAL_${String(nextAdditional).padStart(2, "0")}`;
+        nextAdditional += 1;
+      }
+      existingCounts[slotName] = (existingCounts[slotName] || 0) + 1;
+      additions.push(buildQueueItem(file, "PHOTO", slotName));
+    }
+
+    setAdditionalIndex(nextAdditional);
+    setQueue((prev) => [...prev, ...additions]);
+  };
+
+  const addVideos = (files: FileList | null) => {
+    if (!files || files.length === 0) {
+      return;
+    }
+    const additions = Array.from(files).map((file) => buildQueueItem(file, "VIDEO", "VIDEO"));
+    setQueue((prev) => [...prev, ...additions]);
+  };
+
   const uploadClassic = async (item: QueueItem) => {
     setItemState(item.id, "uploading");
     try {
       const formData = new FormData();
       formData.append("date", dateKey);
       formData.append("kind", item.kind);
-      formData.append("slotName", item.kind === "VIDEO" ? "VIDEO" : "FOTO");
+      formData.append("slotName", item.slotName);
       formData.append("file", item.file);
 
       const response = await fetch("/api/store/upload", {
@@ -192,10 +270,10 @@ export function StoreUploadWizard() {
         throw new Error(msg);
       }
       setItemState(item.id, "done", null, "Subida completada");
-    } catch (error) {
-      const msg = toUserError(error, "Error de red al subir archivo");
+    } catch (uploadError) {
+      const msg = toUserError(uploadError, "Error de red al subir archivo");
       setItemState(item.id, "error", msg);
-      throw error;
+      throw uploadError;
     }
   };
 
@@ -204,7 +282,7 @@ export function StoreUploadWizard() {
     try {
       const result = await uploadVideoResumable(item.file, {
         date: dateKey,
-        slotName: "VIDEO",
+        slotName: item.slotName,
         onProgress: (progress) => {
           if (progress.phase === "optimizing") {
             setItemState(item.id, "uploading", null, "Optimizando vídeo...");
@@ -227,10 +305,10 @@ export function StoreUploadWizard() {
           ? `Vídeo optimizado y enviado (${Math.round(result.usedFile.size / 1024)} KB)`
           : "Vídeo enviado"
       );
-    } catch (error) {
-      const msg = toUserError(error, "Error de red en subida de vídeo");
+    } catch (uploadError) {
+      const msg = toUserError(uploadError, "Error de red en subida de vídeo");
       setItemState(item.id, "error", msg);
-      throw error;
+      throw uploadError;
     }
   };
 
@@ -257,7 +335,7 @@ export function StoreUploadWizard() {
         try {
           await uploadItem(item);
         } catch {
-          // continues with the rest; each item stores its own error
+          // keeps processing the rest; each item stores its own error
         }
       }
       await loadDay(dateKey);
@@ -309,17 +387,54 @@ export function StoreUploadWizard() {
       </article>
 
       <article className="panel p-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Capturar en lote</p>
-        <p className="text-sm text-muted">Haz todas las capturas primero y luego pulsa “Enviar todo”.</p>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Captura guiada</p>
+          <button
+            onClick={() => setGuidedMode((prev) => !prev)}
+            className={`h-8 rounded-xl px-3 text-xs font-semibold ${guidedMode ? "bg-primary text-white" : "border border-line bg-white text-muted"}`}
+          >
+            {guidedMode ? "Finalizar proceso" : "Iniciar proceso"}
+          </button>
+        </div>
+        {guidedMode ? (
+          <div className="space-y-2">
+            <p className="text-sm text-muted">
+              Siguiente título: <strong>{nextPhotoLabel}</strong>
+            </p>
+            {nextRequiredSlot ? (
+              <p className="text-xs text-muted">
+                Captura en orden de requeridas. Cuando completes todas, las nuevas quedarán como adicionales.
+              </p>
+            ) : (
+              <p className="text-xs text-muted">Requeridas completas. Puedes seguir capturando fotos adicionales.</p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <label className="btn-primary h-10 cursor-pointer px-3 text-xs">
+                Capturar siguiente
+                <input hidden type="file" accept="image/*" capture="environment" onChange={(event) => addGuidedPhotos(event.target.files)} />
+              </label>
+              <label className="btn-ghost h-10 cursor-pointer px-3 text-xs">
+                Subir archivo foto
+                <input hidden type="file" accept="image/*" onChange={(event) => addGuidedPhotos(event.target.files)} />
+              </label>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-muted">Activa el proceso guiado para capturar una tras otra con el título requerido.</p>
+        )}
+      </article>
 
+      <article className="panel p-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Vídeos</p>
+        <p className="text-sm text-muted">Puedes añadir vídeos en cualquier momento.</p>
         <div className="mt-3 flex flex-wrap gap-2">
-          <label className="btn-primary h-10 cursor-pointer px-3 text-xs">
-            Añadir foto
-            <input hidden type="file" accept="image/*" capture="environment" onChange={(event) => addToQueue(event.target.files, "PHOTO")} />
+          <label className="btn-ghost h-10 cursor-pointer px-3 text-xs">
+            Añadir vídeo cámara
+            <input hidden type="file" accept="video/*" capture="environment" onChange={(event) => addVideos(event.target.files)} />
           </label>
           <label className="btn-ghost h-10 cursor-pointer px-3 text-xs">
-            Añadir vídeo
-            <input hidden type="file" accept="video/*" capture="environment" onChange={(event) => addToQueue(event.target.files, "VIDEO")} />
+            Añadir vídeo archivo
+            <input hidden type="file" accept="video/*" onChange={(event) => addVideos(event.target.files)} />
           </label>
         </div>
       </article>
@@ -340,7 +455,7 @@ export function StoreUploadWizard() {
                 <div>
                   <p className="truncate text-sm font-semibold">{item.file.name}</p>
                   <p className="text-xs text-muted">
-                    {item.kind === "PHOTO" ? "Foto" : "Vídeo"} · {Math.round(item.file.size / 1024)} KB
+                    {item.kind === "PHOTO" ? "Foto" : "Vídeo"} · {item.slotName} · {Math.round(item.file.size / 1024)} KB
                   </p>
                   {item.hint ? <p className="text-xs text-muted">{item.hint}</p> : null}
                   {item.error ? <p className="text-xs font-semibold text-danger">{item.error}</p> : null}

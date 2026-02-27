@@ -61,6 +61,34 @@ export async function GET(request: Request) {
   }
 
   const groups = [...new Set(uploadDay.files.map((file) => file.versionGroupId))];
+  const allVersions =
+    groups.length > 0
+      ? await prisma.uploadFile.findMany({
+          where: {
+            uploadDayId: uploadDay.id,
+            versionGroupId: { in: groups }
+          },
+          orderBy: [{ versionGroupId: "asc" }, { versionNumber: "asc" }, { createdAt: "asc" }],
+          select: {
+            id: true,
+            versionGroupId: true,
+            versionNumber: true,
+            kind: true,
+            finalFilename: true,
+            mimeType: true,
+            driveFileId: true,
+            bytes: true,
+            createdAt: true
+          }
+        })
+      : [];
+
+  const versionsByGroup = allVersions.reduce<Record<string, typeof allVersions>>((acc, file) => {
+    acc[file.versionGroupId] ??= [];
+    acc[file.versionGroupId].push(file);
+    return acc;
+  }, {});
+
   const threads =
     groups.length > 0
       ? await prisma.mediaThread.findMany({
@@ -111,7 +139,19 @@ export async function GET(request: Request) {
         thumbUrl: file.kind === "PHOTO" ? `https://drive.google.com/thumbnail?id=${file.driveFileId}` : null,
         downloadUrl: `/api/store/media/file/${file.id}/download`,
         threadCount: threadByGroup[file.versionGroupId] || 0,
-        unreadThreadCount: unreadByGroup[file.versionGroupId] || 0
+        unreadThreadCount: unreadByGroup[file.versionGroupId] || 0,
+        versions: (versionsByGroup[file.versionGroupId] || []).map((entry) => ({
+          id: entry.id,
+          versionNumber: entry.versionNumber,
+          kind: entry.kind,
+          finalFilename: entry.finalFilename,
+          mimeType: entry.mimeType,
+          driveFileId: entry.driveFileId,
+          bytes: entry.bytes,
+          createdAt: entry.createdAt,
+          thumbUrl: entry.kind === "PHOTO" ? `https://drive.google.com/thumbnail?id=${entry.driveFileId}` : null,
+          downloadUrl: `/api/store/media/file/${entry.id}/download`
+        }))
       }))
     }
   });

@@ -3,7 +3,6 @@ import { AppHeader } from "@/components/app-header";
 import { StoreMediaReview } from "@/components/store-media-review";
 import { StatusChip } from "@/components/status-chip";
 import { formatDateKey } from "@/lib/date";
-import { driveFolderLink } from "@/lib/drive-links";
 import { requireStorePage } from "@/lib/page-auth";
 import { prisma } from "@/lib/prisma";
 
@@ -61,16 +60,6 @@ export default async function StoreHistoryPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <StatusChip status={day.status} />
-                  {day.driveFolderId ? (
-                    <a
-                      href={driveFolderLink(day.driveFolderId)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs font-semibold text-primary hover:underline"
-                    >
-                      Drive
-                    </a>
-                  ) : null}
                 </div>
               </div>
             </li>

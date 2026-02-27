@@ -4,7 +4,6 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { StatusChip } from "@/components/status-chip";
 import { toUserError, uploadVideoResumable } from "@/lib/client-video-upload";
 import { drawBoundsFromPoints, injectDrawAnnotation, pointsToSvgPath, splitDrawAnnotation, type DrawPoint } from "@/lib/draw-annotation";
-import { driveFolderLink } from "@/lib/drive-links";
 
 type Role = "STORE" | "CLUSTER" | "SUPERADMIN";
 
@@ -23,6 +22,18 @@ type StoreFile = {
   unreadThreadCount: number;
   thumbUrl: string | null;
   downloadUrl: string;
+  versions: Array<{
+    id: string;
+    versionNumber: number;
+    kind: "PHOTO" | "VIDEO";
+    finalFilename: string;
+    mimeType: string;
+    driveFileId: string;
+    bytes: number;
+    createdAt: string;
+    thumbUrl: string | null;
+    downloadUrl: string;
+  }>;
 };
 
 type StoreMediaPayload = {
@@ -94,10 +105,15 @@ export function StoreMediaReview() {
   const [drawing, setDrawing] = useState(false);
   const [replaceFile, setReplaceFile] = useState<File | null>(null);
   const [replacing, setReplacing] = useState(false);
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const viewerRef = useRef<HTMLDivElement | null>(null);
 
   const files = payload?.uploadDay?.files || [];
   const activeFile = galleryIndex === null ? null : files[galleryIndex] || null;
+  const activeVersion =
+    activeFile?.versions.find((version) => version.id === selectedVersionId) ||
+    activeFile?.versions[activeFile.versions.length - 1] ||
+    null;
   const unreadFiles = files.filter((item) => item.unreadThreadCount > 0);
 
   const load = async (day?: string) => {
@@ -109,12 +125,14 @@ export function StoreMediaReview() {
       const json = (await parseJson(response)) as (StoreMediaPayload & { error?: string }) | null;
       if (!response.ok || !json) {
         setError(json?.error || "No se pudo cargar enviados");
-        return;
+        return null;
       }
       setPayload(json);
       setShowUnreadPopup((json.uploadDay?.files || []).some((file) => file.unreadThreadCount > 0));
+      return json;
     } catch {
       setError("Error de conexión");
+      return null;
     } finally {
       setLoading(false);
     }
@@ -182,6 +200,7 @@ export function StoreMediaReview() {
     setDrawing(false);
     setNewThreadText("");
     setReplaceFile(null);
+    setSelectedVersionId(file.id);
     void loadThreads(file);
   };
 
@@ -235,9 +254,10 @@ export function StoreMediaReview() {
   const onCreateThread = async (event: FormEvent) => {
     event.preventDefault();
     if (!activeFile || !newThreadText.trim()) return;
+    const linkedFileId = activeVersion?.id || activeFile.id;
     const bounds = drawBoundsFromPoints(drawPathDraft);
     const body: Record<string, unknown> = {
-      fileId: activeFile.id,
+      fileId: linkedFileId,
       text: injectDrawAnnotation(newThreadText.trim(), drawPathDraft)
     };
     if (bounds) {
@@ -310,8 +330,23 @@ export function StoreMediaReview() {
     }
 
     setReplacing(false);
-    closeGallery();
-    await load(date);
+    const refreshed = await load(date);
+    const reloadedFiles = refreshed?.uploadDay?.files || [];
+    const nextIndex = reloadedFiles.findIndex((entry) => entry.versionGroupId === activeFile.versionGroupId);
+    if (nextIndex >= 0) {
+      const file = reloadedFiles[nextIndex];
+      setGalleryIndex(nextIndex);
+      setSelectedVersionId(file.id);
+      setThreads([]);
+      setDrawMode(false);
+      setDrawPathDraft([]);
+      setDrawing(false);
+      setNewThreadText("");
+      setReplaceFile(null);
+      void loadThreads(file);
+    } else {
+      closeGallery();
+    }
   };
 
   return (
@@ -322,9 +357,6 @@ export function StoreMediaReview() {
           <input type="date" className="input max-w-[190px]" value={date} onChange={(event) => setDate(event.target.value)} />
           <button onClick={() => void load(date)} className="btn-ghost h-10 px-3 text-xs">Actualizar</button>
           {payload?.uploadDay ? <StatusChip status={payload.uploadDay.status} /> : null}
-          {payload?.uploadDay?.driveFolderId ? (
-            <a className="text-xs font-semibold text-primary hover:underline" href={driveFolderLink(payload.uploadDay.driveFolderId)} target="_blank" rel="noreferrer">Abrir carpeta Drive</a>
-          ) : null}
         </div>
       </article>
 
@@ -400,13 +432,34 @@ export function StoreMediaReview() {
                   </button>
                 ) : null}
                 <label className="btn-ghost h-8 cursor-pointer px-3 text-xs">
-                  Subir V2
+                  V2 archivo
                   <input hidden type="file" accept={activeFile.kind === "PHOTO" ? "image/*" : "video/*"} onChange={(event) => setReplaceFile(event.target.files?.[0] || null)} />
                 </label>
+                {activeFile.kind === "PHOTO" ? (
+                  <label className="btn-ghost h-8 cursor-pointer px-3 text-xs">
+                    V2 cámara
+                    <input hidden type="file" accept="image/*" capture="environment" onChange={(event) => setReplaceFile(event.target.files?.[0] || null)} />
+                  </label>
+                ) : null}
                 <button onClick={() => void onReplace()} disabled={!replaceFile || replacing} className="btn-primary h-8 px-3 text-xs disabled:opacity-60">
                   {replacing ? "Subiendo..." : replaceFile ? "Enviar versión" : "Selecciona archivo"}
                 </button>
               </div>
+              {activeFile.versions.length > 1 ? (
+                <div className="mb-2 flex gap-2 overflow-x-auto">
+                  {activeFile.versions.map((version) => (
+                    <button
+                      key={version.id}
+                      onClick={() => setSelectedVersionId(version.id)}
+                      className={`shrink-0 rounded-lg border px-2 py-1 text-xs font-semibold ${
+                        selectedVersionId === version.id ? "border-primary bg-sky-50 text-primary" : "border-line bg-white text-muted"
+                      }`}
+                    >
+                      V{version.versionNumber}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
 
               <div
                 ref={viewerRef}
@@ -416,10 +469,10 @@ export function StoreMediaReview() {
                 onPointerUp={onDrawUp}
                 onPointerLeave={onDrawUp}
               >
-                {activeFile.kind === "PHOTO" ? (
-                  <img src={`https://drive.google.com/thumbnail?id=${activeFile.driveFileId}&sz=w2000`} alt={activeFile.finalFilename} className="mx-auto max-h-[75vh] w-auto object-contain" />
+                {activeVersion?.kind === "PHOTO" ? (
+                  <img src={`https://drive.google.com/thumbnail?id=${activeVersion.driveFileId}&sz=w2000`} alt={activeVersion.finalFilename} className="mx-auto max-h-[75vh] w-auto object-contain" />
                 ) : (
-                  <video controls className="mx-auto max-h-[75vh] w-full"><source src={activeFile.downloadUrl} type={activeFile.mimeType} /></video>
+                  <video controls className="mx-auto max-h-[75vh] w-full"><source src={activeVersion?.downloadUrl || activeFile.downloadUrl} type={activeVersion?.mimeType || activeFile.mimeType} /></video>
                 )}
                 {threads.filter((thread) => thread.zoneX !== null && thread.zoneY !== null && thread.zoneW !== null && thread.zoneH !== null).map((thread) => (
                   <div key={thread.id} className={`pointer-events-none absolute border-2 ${thread.resolvedAt ? "border-emerald-500" : "border-amber-500"}`} style={{ left: `${(thread.zoneX || 0) * 100}%`, top: `${(thread.zoneY || 0) * 100}%`, width: `${(thread.zoneW || 0) * 100}%`, height: `${(thread.zoneH || 0) * 100}%` }} />
@@ -451,6 +504,11 @@ export function StoreMediaReview() {
             </article>
 
             <aside className="flex min-h-0 flex-col rounded-xl bg-white p-3">
+              {activeVersion ? (
+                <p className="mb-2 text-xs text-muted">
+                  Viendo versión V{activeVersion.versionNumber} · {new Date(activeVersion.createdAt).toLocaleString()}
+                </p>
+              ) : null}
               <form onSubmit={onCreateThread} className="mb-3 space-y-2 rounded-lg border border-line bg-slate-50 p-2">
                 <textarea className="w-full rounded-lg border border-line bg-white p-2 text-sm outline-none focus:border-primary" rows={3} value={newThreadText} onChange={(event) => setNewThreadText(event.target.value)} placeholder="Nuevo comentario..." />
                 <p className="text-[11px] text-muted">
