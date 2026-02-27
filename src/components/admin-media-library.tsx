@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { StatusChip } from "@/components/status-chip";
 import { driveFilePreviewLink, driveFolderLink } from "@/lib/drive-links";
+import { drawBoundsFromPoints, injectDrawAnnotation, pointsToSvgPath, splitDrawAnnotation, type DrawPoint } from "@/lib/draw-annotation";
 
 type StoreLite = { id: string; name: string; storeCode: string };
 type Role = "STORE" | "CLUSTER" | "SUPERADMIN";
@@ -63,8 +64,6 @@ type ThreadItem = {
   messages: ThreadMessage[];
 };
 
-type Zone = { x: number; y: number; w: number; h: number };
-
 const FILTERS: Array<{ id: FilterId; label: string }> = [
   { id: "PENDING_VALIDATION", label: "Pendiente de validar" },
   { id: "WITH_COMMENTS", label: "Con comentarios" },
@@ -109,8 +108,8 @@ export function AdminMediaLibrary() {
   const [showUnreadPopup, setShowUnreadPopup] = useState(false);
 
   const [drawMode, setDrawMode] = useState(false);
-  const [zoneDraft, setZoneDraft] = useState<Zone | null>(null);
-  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [drawPathDraft, setDrawPathDraft] = useState<DrawPoint[]>([]);
+  const [drawing, setDrawing] = useState(false);
   const [newThreadText, setNewThreadText] = useState("");
   const [draftByThread, setDraftByThread] = useState<Record<string, string>>({});
   const viewerRef = useRef<HTMLDivElement | null>(null);
@@ -130,7 +129,9 @@ export function AdminMediaLibrary() {
         return;
       }
       setPayload(json);
-      if (json.selectedStoreId) setSelectedStoreId(json.selectedStoreId);
+      if (json.selectedStoreId && json.selectedStoreId !== currentStore) {
+        setSelectedStoreId(json.selectedStoreId);
+      }
       setShowUnreadPopup((json.uploadDay?.files || []).some((file) => file.unreadThreadCount > 0));
     } catch {
       setError("Error de conexión");
@@ -140,8 +141,8 @@ export function AdminMediaLibrary() {
   };
 
   useEffect(() => {
-    void load("", date);
-  }, []);
+    void load(selectedStoreId, date);
+  }, [selectedStoreId, date]);
 
   const allFiles = payload?.uploadDay?.files ?? [];
   const filteredFiles = useMemo(() => {
@@ -212,7 +213,8 @@ export function AdminMediaLibrary() {
     setGalleryIndex(index);
     setThreads([]);
     setDrawMode(false);
-    setZoneDraft(null);
+    setDrawPathDraft([]);
+    setDrawing(false);
     setNewThreadText("");
     void loadThreads(file.id, file.versionGroupId);
   };
@@ -229,28 +231,46 @@ export function AdminMediaLibrary() {
     if (!drawMode || !activeFile || activeFile.kind !== "PHOTO") return;
     const p = pointerNorm(event);
     if (!p) return;
-    setDragStart(p);
-    setZoneDraft({ x: p.x, y: p.y, w: 0, h: 0 });
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDrawing(true);
+    setDrawPathDraft([p]);
   };
 
   const onDrawMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!drawMode || !dragStart) return;
+    if (!drawMode || !drawing) return;
     const p = pointerNorm(event);
     if (!p) return;
-    setZoneDraft({
-      x: Math.min(p.x, dragStart.x),
-      y: Math.min(p.y, dragStart.y),
-      w: Math.abs(p.x - dragStart.x),
-      h: Math.abs(p.y - dragStart.y)
+    setDrawPathDraft((prev) => {
+      if (prev.length === 0) return [p];
+      const last = prev[prev.length - 1];
+      const dx = p.x - last.x;
+      const dy = p.y - last.y;
+      if (dx * dx + dy * dy < 0.00002) {
+        return prev;
+      }
+      return [...prev, p];
     });
+  };
+
+  const onDrawUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!drawing) return;
+    setDrawing(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   const onCreateThread = async (event: FormEvent) => {
     event.preventDefault();
     if (!activeFile || !newThreadText.trim()) return;
-    const body: Record<string, unknown> = { fileId: activeFile.id, text: newThreadText.trim() };
-    if (zoneDraft && zoneDraft.w > 0.01 && zoneDraft.h > 0.01) {
-      Object.assign(body, { zoneX: zoneDraft.x, zoneY: zoneDraft.y, zoneW: zoneDraft.w, zoneH: zoneDraft.h });
+    const bounds = drawBoundsFromPoints(drawPathDraft);
+    const body: Record<string, unknown> = {
+      fileId: activeFile.id,
+      text: injectDrawAnnotation(newThreadText.trim(), drawPathDraft)
+    };
+    if (bounds) {
+      Object.assign(body, bounds);
     }
     const response = await fetch("/api/media/threads", {
       method: "POST",
@@ -264,7 +284,8 @@ export function AdminMediaLibrary() {
     }
     setNewThreadText("");
     setDrawMode(false);
-    setZoneDraft(null);
+    setDrawPathDraft([]);
+    setDrawing(false);
     updateFile(activeFile.id, { threadCount: activeFile.threadCount + 1 });
     await loadThreads(activeFile.id, activeFile.versionGroupId);
   };
@@ -306,13 +327,7 @@ export function AdminMediaLibrary() {
   return (
     <section className="space-y-4">
       <article className="panel p-4">
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void load(selectedStoreId, date);
-          }}
-          className="grid gap-2 lg:grid-cols-[1fr_180px_120px]"
-        >
+        <div className="grid gap-2 lg:grid-cols-[1fr_180px]">
           <label className="space-y-1">
             <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Tienda</span>
             <select className="input" value={selectedStoreId} onChange={(event) => setSelectedStoreId(event.target.value)}>
@@ -325,8 +340,7 @@ export function AdminMediaLibrary() {
             <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Fecha</span>
             <input className="input" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
           </label>
-          <button className="btn-primary mt-6 h-11">Aplicar</button>
-        </form>
+        </div>
       </article>
 
       <article className="panel p-4">
@@ -432,8 +446,11 @@ export function AdminMediaLibrary() {
               </div>
               <div className="mb-2 flex items-center gap-2">
                 <button onClick={() => setDrawMode((v) => !v)} className={`h-8 rounded-xl px-3 text-xs font-semibold ${drawMode ? "bg-primary text-white" : "border border-line bg-white text-muted"}`}>
-                  {drawMode ? "Modo zona ON" : "Marcar zona"}
+                  {drawMode ? "Lápiz ON" : "Dibujar corrección"}
                 </button>
+                {drawPathDraft.length > 0 ? (
+                  <button onClick={() => setDrawPathDraft([])} className="btn-ghost h-8 px-2 text-xs">Borrar trazo</button>
+                ) : null}
                 <button
                   onClick={() => void toggleValidation(activeFile)}
                   className={`h-8 rounded-xl px-2 text-xs font-semibold ${
@@ -443,7 +460,14 @@ export function AdminMediaLibrary() {
                   {activeFile.validatedAt ? "Quitar validación" : "Validar"}
                 </button>
               </div>
-              <div ref={viewerRef} className={`relative min-h-0 flex-1 overflow-auto rounded-xl border border-line bg-slate-100 ${drawMode ? "cursor-crosshair" : ""}`} onPointerDown={onDrawDown} onPointerMove={onDrawMove} onPointerUp={() => setDragStart(null)}>
+              <div
+                ref={viewerRef}
+                className={`relative min-h-0 flex-1 overflow-auto rounded-xl border border-line bg-slate-100 ${drawMode ? "cursor-crosshair touch-none" : ""}`}
+                onPointerDown={onDrawDown}
+                onPointerMove={onDrawMove}
+                onPointerUp={onDrawUp}
+                onPointerLeave={onDrawUp}
+              >
                 {activeFile.kind === "PHOTO" ? (
                   <img src={`https://drive.google.com/thumbnail?id=${activeFile.driveFileId}&sz=w2000`} alt={activeFile.finalFilename} className="mx-auto max-h-[75vh] w-auto object-contain" />
                 ) : (
@@ -452,14 +476,38 @@ export function AdminMediaLibrary() {
                 {threads.filter((thread) => thread.zoneX !== null && thread.zoneY !== null && thread.zoneW !== null && thread.zoneH !== null).map((thread) => (
                   <div key={thread.id} className={`pointer-events-none absolute border-2 ${thread.resolvedAt ? "border-emerald-500" : "border-amber-500"}`} style={{ left: `${(thread.zoneX || 0) * 100}%`, top: `${(thread.zoneY || 0) * 100}%`, width: `${(thread.zoneW || 0) * 100}%`, height: `${(thread.zoneH || 0) * 100}%` }} />
                 ))}
-                {zoneDraft ? <div className="pointer-events-none absolute border-2 border-primary" style={{ left: `${zoneDraft.x * 100}%`, top: `${zoneDraft.y * 100}%`, width: `${zoneDraft.w * 100}%`, height: `${zoneDraft.h * 100}%` }} /> : null}
+                {threads.map((thread) => {
+                  const firstMessage = thread.messages[0]?.text || "";
+                  const points = splitDrawAnnotation(firstMessage).points;
+                  const d = pointsToSvgPath(points);
+                  if (!d) return null;
+                  return (
+                    <svg key={`path-${thread.id}`} viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
+                      <path
+                        d={d}
+                        fill="none"
+                        stroke={thread.resolvedAt ? "#16a34a" : "#f59e0b"}
+                        strokeWidth={1}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  );
+                })}
+                {drawPathDraft.length >= 2 ? (
+                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
+                    <path d={pointsToSvgPath(drawPathDraft)} fill="none" stroke="#0f6cbd" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                ) : null}
               </div>
             </article>
 
             <aside className="flex min-h-0 flex-col rounded-xl bg-white p-3">
               <form onSubmit={onCreateThread} className="mb-3 space-y-2 rounded-lg border border-line bg-slate-50 p-2">
                 <textarea className="w-full rounded-lg border border-line bg-white p-2 text-sm outline-none focus:border-primary" rows={3} value={newThreadText} onChange={(event) => setNewThreadText(event.target.value)} placeholder="Nuevo comentario del hilo..." />
-                <p className="text-[11px] text-muted">{zoneDraft ? "Se enviará con zona marcada" : "Sin zona. Activa “Marcar zona” y arrastra sobre imagen."}</p>
+                <p className="text-[11px] text-muted">
+                  {drawPathDraft.length >= 2 ? "Se enviará con trazo dibujado" : "Opcional: activa “Dibujar corrección” y marca sobre la imagen."}
+                </p>
                 <button disabled={!newThreadText.trim()} className="btn-primary h-9 w-full text-xs">Crear hilo</button>
               </form>
               {threadsLoading ? <p className="text-sm text-muted">Cargando hilos...</p> : null}
@@ -474,7 +522,7 @@ export function AdminMediaLibrary() {
                       {thread.messages.map((msg) => (
                         <div key={msg.id} className="rounded-lg bg-slate-100 px-2 py-1">
                           <p className="text-[11px] font-semibold text-muted">{roleLabel(msg.authorRole)} · {new Date(msg.createdAt).toLocaleString()} {msg.fileVersionNumber ? `· V${msg.fileVersionNumber}` : ""}</p>
-                          <p className="whitespace-pre-wrap text-sm">{msg.text}</p>
+                          <p className="whitespace-pre-wrap text-sm">{splitDrawAnnotation(msg.text).cleanText}</p>
                         </div>
                       ))}
                     </div>
