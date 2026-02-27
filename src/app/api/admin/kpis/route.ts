@@ -1,9 +1,9 @@
 import { addDays, endOfDay, startOfWeek } from "date-fns";
-import { formatDateKey, parseDateKey, toDayStart, todayDateKey } from "@/lib/date";
+import { formatDateKey, parseDateKey, toDayStart } from "@/lib/date";
 import { badRequest, unauthorized } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import { requireManager, storeScopeWhere } from "@/lib/request-auth";
-import { getRequirementForStoreDate } from "@/lib/upload-requirements";
+import { buildRequirementLookup, resolveRequirementFromLookup } from "@/lib/requirement-resolution";
 
 export async function GET(request: Request) {
   const manager = await requireManager();
@@ -56,7 +56,11 @@ export async function GET(request: Request) {
   }
 
   const storeIds = stores.map((store) => store.id);
-  const [uploadDays, unresolvedByStore] = await Promise.all([
+  const clusterIds = [...new Set(stores.map((store) => store.clusterId).filter((value): value is string => Boolean(value)))];
+  const weekDates = Array.from({ length: 7 }).map((_, index) => toDayStart(addDays(weekStart, index)));
+  const weekWeekdays = [...new Set(weekDates.map((date) => date.getDay()))];
+
+  const [uploadDays, unresolvedByStore, storeRules, clusterRules, globalRules] = await Promise.all([
     prisma.uploadDay.findMany({
       where: {
         storeId: { in: storeIds },
@@ -89,10 +93,49 @@ export async function GET(request: Request) {
         }
       },
       _count: { _all: true }
+    }),
+    prisma.uploadRule.findMany({
+      where: {
+        storeId: { in: storeIds },
+        weekday: { in: weekWeekdays }
+      },
+      select: {
+        storeId: true,
+        weekday: true,
+        requirement: true
+      }
+    }),
+    clusterIds.length > 0
+      ? prisma.uploadRule.findMany({
+          where: {
+            clusterId: { in: clusterIds },
+            weekday: { in: weekWeekdays }
+          },
+          select: {
+            clusterId: true,
+            weekday: true,
+            requirement: true
+          }
+        })
+      : Promise.resolve([]),
+    prisma.uploadRule.findMany({
+      where: {
+        storeId: null,
+        clusterId: null,
+        weekday: { in: weekWeekdays }
+      },
+      orderBy: {
+        updatedAt: "desc"
+      },
+      select: {
+        weekday: true,
+        requirement: true
+      }
     })
   ]);
 
   const unresolvedMap = new Map(unresolvedByStore.map((item) => [item.storeId, item._count._all]));
+  const lookup = buildRequirementLookup(storeRules, clusterRules, globalRules);
 
   const uploadMap = new Map<string, (typeof uploadDays)[number][]>();
   for (const day of uploadDays) {
@@ -100,8 +143,6 @@ export async function GET(request: Request) {
     list.push(day);
     uploadMap.set(day.storeId, list);
   }
-
-  const weekDates = Array.from({ length: 7 }).map((_, index) => toDayStart(addDays(weekStart, index)));
 
   const items = [];
   for (const store of stores) {
@@ -113,8 +154,14 @@ export async function GET(request: Request) {
     for (const date of weekDates) {
       const key = formatDateKey(date);
       const existing = byDate.get(key);
-      const requirement =
-        existing?.requirementKind || (await getRequirementForStoreDate(store.id, store.clusterId ?? null, date));
+      const weekday = date.getDay();
+      const requirement = resolveRequirementFromLookup({
+        storeId: store.id,
+        clusterId: store.clusterId ?? null,
+        weekday,
+        existingRequirement: existing?.requirementKind,
+        lookup
+      });
 
       if (requirement !== "NONE") {
         requiredDays += 1;

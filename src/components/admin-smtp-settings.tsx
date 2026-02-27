@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { parseResponseJson } from "@/lib/client-json";
 
 type SmtpPayload = {
   item: {
@@ -37,20 +38,20 @@ export function AdminSmtpSettings() {
     setError(null);
     try {
       const response = await fetch("/api/admin/settings/smtp", { cache: "no-store" });
-      const json = (await response.json()) as SmtpPayload & { error?: string };
+      const json = await parseResponseJson<SmtpPayload & { error?: string }>(response);
       if (!response.ok) {
-        setError(json.error || "No se pudo cargar SMTP");
+        setError(json?.error || "No se pudo cargar SMTP");
         return;
       }
 
-      setSmtpEnabled(json.item.smtpEnabled);
-      setSmtpHost(json.item.smtpHost || "");
-      setSmtpPort(String(json.item.smtpPort || 587));
-      setSmtpSecure(json.item.smtpSecure);
-      setSmtpUser(json.item.smtpUser || "");
-      setSmtpFrom(json.item.smtpFrom || "");
-      setSmtpReplyTo(json.item.smtpReplyTo || "");
-      setHasPassword(json.item.hasPassword);
+      setSmtpEnabled(Boolean(json?.item.smtpEnabled));
+      setSmtpHost(json?.item.smtpHost || "");
+      setSmtpPort(String(json?.item.smtpPort || 587));
+      setSmtpSecure(Boolean(json?.item.smtpSecure));
+      setSmtpUser(json?.item.smtpUser || "");
+      setSmtpFrom(json?.item.smtpFrom || "");
+      setSmtpReplyTo(json?.item.smtpReplyTo || "");
+      setHasPassword(Boolean(json?.item.hasPassword));
       setSmtpPass("");
       setClearPassword(false);
     } catch {
@@ -85,9 +86,9 @@ export function AdminSmtpSettings() {
           smtpReplyTo: smtpReplyTo.trim() || null
         })
       });
-      const json = await response.json();
+      const json = await parseResponseJson<{ error?: string }>(response);
       if (!response.ok) {
-        setError(json.error || "No se pudo guardar SMTP");
+        setError(json?.error || "No se pudo guardar SMTP");
         return;
       }
       setMessage("Configuración SMTP guardada");

@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { parseResponseJson } from "@/lib/client-json";
 
 export function LoginForm() {
   const router = useRouter();
@@ -21,13 +22,13 @@ export function LoginForm() {
         body: JSON.stringify({ identifier, password })
       });
 
-      const json = await response.json();
+      const json = await parseResponseJson<{ error?: string; user?: { role?: "STORE" | "CLUSTER" | "SUPERADMIN" } }>(response);
       if (!response.ok) {
-        setError(json.error || "Error de autenticación");
+        setError(json?.error || "Error de autenticación");
         return;
       }
 
-      router.push(json.user.role === "STORE" ? "/store" : "/admin");
+      router.push(json?.user?.role === "STORE" ? "/store" : "/admin");
       router.refresh();
     } catch {
       setError("No se pudo conectar con el servidor");

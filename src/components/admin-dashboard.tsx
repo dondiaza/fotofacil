@@ -50,6 +50,16 @@ type AdminDashboardProps = {
   role: DashboardRole;
 };
 
+async function parseJson(response: Response) {
+  const raw = await response.text();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 export function AdminDashboard({ role }: AdminDashboardProps) {
   const [rows, setRows] = useState<StoreRow[]>([]);
   const [kpis, setKpis] = useState<KpiRow[]>([]);
@@ -79,12 +89,12 @@ export function AdminDashboard({ role }: AdminDashboardProps) {
       const params = new URLSearchParams(query ? query.slice(1) : "");
       params.set("date", selectedDate);
       const response = await fetch(`/api/admin/stores?${params.toString()}`, { cache: "no-store" });
-      const json = await response.json();
+      const json = (await parseJson(response)) as ({ items?: StoreRow[]; error?: string }) | null;
       if (!response.ok) {
-        setError(json.error || "No se pudo cargar dashboard");
+        setError(json?.error || "No se pudo cargar dashboard");
         return;
       }
-      setRows(json.items || []);
+      setRows(json?.items || []);
     } catch {
       setError("Error de conexión");
     } finally {
@@ -104,13 +114,13 @@ export function AdminDashboard({ role }: AdminDashboardProps) {
     setClustersError(null);
     try {
       const response = await fetch("/api/admin/accounts/overview", { cache: "no-store" });
-      const json = await response.json();
+      const json = (await parseJson(response)) as ({ clusters?: ClusterSummary[]; stores?: Array<{ id: string; storeCode: string; name: string; isActive: boolean; cluster: { id: string } | null }>; error?: string }) | null;
       if (!response.ok) {
-        setClustersError(json.error || "No se pudo cargar resumen de clusters");
+        setClustersError(json?.error || "No se pudo cargar resumen de clusters");
         return;
       }
-      const nextClusters = Array.isArray(json.clusters) ? (json.clusters as ClusterSummary[]) : [];
-      const allStores = Array.isArray(json.stores) ? json.stores : [];
+      const nextClusters = Array.isArray(json?.clusters) ? (json?.clusters as ClusterSummary[]) : [];
+      const allStores = Array.isArray(json?.stores) ? json.stores : [];
       setClusters(nextClusters);
       setOrphanStores(
         allStores
@@ -138,12 +148,12 @@ export function AdminDashboard({ role }: AdminDashboardProps) {
     setKpiError(null);
     try {
       const response = await fetch(`/api/admin/kpis?weekStart=${targetWeekStart}`, { cache: "no-store" });
-      const json = await response.json();
+      const json = (await parseJson(response)) as ({ items?: KpiRow[]; error?: string }) | null;
       if (!response.ok) {
-        setKpiError(json.error || "No se pudieron cargar KPIs");
+        setKpiError(json?.error || "No se pudieron cargar KPIs");
         return;
       }
-      setKpis(json.items || []);
+      setKpis(json?.items || []);
     } catch {
       setKpiError("Error de conexión en KPIs");
     } finally {

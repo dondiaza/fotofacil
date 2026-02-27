@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ChatPanel } from "@/components/chat-panel";
+import { parseResponseJson } from "@/lib/client-json";
 
 type Role = "STORE" | "CLUSTER" | "SUPERADMIN";
 
@@ -20,8 +21,10 @@ export function AdminInbox({ currentRole }: { currentRole: Role }) {
   const load = async () => {
     setLoading(true);
     const response = await fetch("/api/admin/stores", { cache: "no-store" });
-    const json = await response.json();
-    const items: StoreListItem[] = (json.items || []).map((entry: any) => ({
+    const json = await parseResponseJson<{
+      items?: Array<{ id: string; name: string; storeCode: string; unreadMessages?: number | null }>;
+    }>(response);
+    const items: StoreListItem[] = (json?.items || []).map((entry) => ({
       id: entry.id,
       name: entry.name,
       storeCode: entry.storeCode,
