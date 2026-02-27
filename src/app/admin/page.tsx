@@ -23,7 +23,7 @@ export default async function AdminHomePage() {
         currentPath="/admin"
         links={links}
       />
-      <AdminDashboard />
+      <AdminDashboard role={manager.role} />
     </main>
   );
 }

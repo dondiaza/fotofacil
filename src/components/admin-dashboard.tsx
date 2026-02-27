@@ -18,6 +18,13 @@ type StoreRow = {
   user: { username: string; email: string | null } | null;
 };
 
+type ClusterSummary = {
+  id: string;
+  code: string;
+  name: string;
+  stores: Array<{ id: string; storeCode: string; name: string; isActive: boolean }>;
+};
+
 type KpiRow = {
   storeId: string;
   storeCode: string;
@@ -36,9 +43,19 @@ const filters = [
   { id: "COMPLETE", label: "Completadas" }
 ] as const;
 
-export function AdminDashboard() {
+type DashboardRole = "SUPERADMIN" | "CLUSTER";
+
+type AdminDashboardProps = {
+  role: DashboardRole;
+};
+
+export function AdminDashboard({ role }: AdminDashboardProps) {
   const [rows, setRows] = useState<StoreRow[]>([]);
   const [kpis, setKpis] = useState<KpiRow[]>([]);
+  const [clusters, setClusters] = useState<ClusterSummary[]>([]);
+  const [orphanStores, setOrphanStores] = useState<Array<{ id: string; storeCode: string; name: string; isActive: boolean }>>([]);
+  const [clustersLoading, setClustersLoading] = useState(role === "SUPERADMIN");
+  const [clustersError, setClustersError] = useState<string | null>(null);
   const [weekStart, setWeekStart] = useState(() => {
     const now = new Date();
     const day = now.getDay() || 7;
@@ -74,6 +91,43 @@ export function AdminDashboard() {
   useEffect(() => {
     void load();
   }, [filter]);
+
+  const loadClusters = async () => {
+    if (role !== "SUPERADMIN") {
+      return;
+    }
+    setClustersLoading(true);
+    setClustersError(null);
+    try {
+      const response = await fetch("/api/admin/accounts/overview", { cache: "no-store" });
+      const json = await response.json();
+      if (!response.ok) {
+        setClustersError(json.error || "No se pudo cargar resumen de clusters");
+        return;
+      }
+      const nextClusters = Array.isArray(json.clusters) ? (json.clusters as ClusterSummary[]) : [];
+      const allStores = Array.isArray(json.stores) ? json.stores : [];
+      setClusters(nextClusters);
+      setOrphanStores(
+        allStores
+          .filter((store: { cluster: { id: string } | null }) => !store.cluster)
+          .map((store: { id: string; storeCode: string; name: string; isActive: boolean }) => ({
+            id: store.id,
+            storeCode: store.storeCode,
+            name: store.name,
+            isActive: store.isActive
+          }))
+      );
+    } catch {
+      setClustersError("Error de conexión en resumen de clusters");
+    } finally {
+      setClustersLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadClusters();
+  }, [role]);
 
   const loadKpis = async (targetWeekStart = weekStart) => {
     setLoadingKpis(true);
@@ -119,6 +173,57 @@ export function AdminDashboard() {
 
   return (
     <section className="space-y-4">
+      {role === "SUPERADMIN" ? (
+        <article className="panel p-4">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Clusters y tiendas</p>
+            <button onClick={() => void loadClusters()} className="text-xs font-semibold text-primary hover:underline">
+              Actualizar
+            </button>
+          </div>
+          {clustersLoading ? <p className="text-sm text-muted">Cargando resumen...</p> : null}
+          {clustersError ? <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{clustersError}</p> : null}
+          {!clustersLoading ? (
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              {clusters.map((cluster) => (
+                <article key={cluster.id} className="rounded-xl border border-line p-3">
+                  <p className="text-sm font-semibold">
+                    {cluster.code} · {cluster.name}
+                  </p>
+                  <p className="text-xs text-muted">{cluster.stores.length} tienda(s)</p>
+                  <ul className="mt-2 space-y-1">
+                    {cluster.stores.slice(0, 8).map((store) => (
+                      <li key={store.id} className="truncate text-xs text-muted">
+                        {store.storeCode} · {store.name}
+                      </li>
+                    ))}
+                    {cluster.stores.length > 8 ? (
+                      <li className="text-xs font-semibold text-primary">+{cluster.stores.length - 8} más</li>
+                    ) : null}
+                  </ul>
+                </article>
+              ))}
+              {orphanStores.length > 0 ? (
+                <article className="rounded-xl border border-dashed border-line p-3">
+                  <p className="text-sm font-semibold">Sin cluster</p>
+                  <p className="text-xs text-muted">{orphanStores.length} tienda(s)</p>
+                  <ul className="mt-2 space-y-1">
+                    {orphanStores.slice(0, 8).map((store) => (
+                      <li key={store.id} className="truncate text-xs text-muted">
+                        {store.storeCode} · {store.name}
+                      </li>
+                    ))}
+                    {orphanStores.length > 8 ? (
+                      <li className="text-xs font-semibold text-primary">+{orphanStores.length - 8} más</li>
+                    ) : null}
+                  </ul>
+                </article>
+              ) : null}
+            </div>
+          ) : null}
+        </article>
+      ) : null}
+
       <article className="grid gap-3 sm:grid-cols-4">
         <div className="panel p-4">
           <p className="text-xs uppercase tracking-[0.1em] text-muted">Tiendas</p>

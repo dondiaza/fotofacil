@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { StatusChip } from "@/components/status-chip";
 import { driveFilePreviewLink, driveFolderLink } from "@/lib/drive-links";
-import { drawBoundsFromPoints, injectDrawAnnotation, pointsToSvgPath, splitDrawAnnotation, type DrawPoint } from "@/lib/draw-annotation";
+import { injectDrawAnnotation, pointsToSvgPath, splitDrawAnnotation, type DrawPoint } from "@/lib/draw-annotation";
 
 type StoreLite = { id: string; name: string; storeCode: string };
 type Role = "STORE" | "CLUSTER" | "SUPERADMIN";
@@ -50,6 +50,7 @@ type ThreadMessage = {
   authorRole: Role;
   text: string;
   createdAt: string;
+  fileId: string | null;
   fileVersionNumber: number | null;
 };
 
@@ -113,6 +114,8 @@ export function AdminMediaLibrary() {
   const [newThreadText, setNewThreadText] = useState("");
   const [draftByThread, setDraftByThread] = useState<Record<string, string>>({});
   const viewerRef = useRef<HTMLDivElement | null>(null);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const touchMovedRef = useRef(false);
 
   const load = async (storeId?: string, day?: string) => {
     const currentDate = day ?? date;
@@ -219,6 +222,23 @@ export function AdminMediaLibrary() {
     void loadThreads(file.id, file.versionGroupId);
   };
 
+  const goToGalleryIndex = (index: number) => {
+    if (index < 0 || index >= filteredFiles.length) {
+      return;
+    }
+    openGallery(index);
+  };
+
+  const goPrev = () => {
+    if (galleryIndex === null) return;
+    goToGalleryIndex(galleryIndex - 1);
+  };
+
+  const goNext = () => {
+    if (galleryIndex === null) return;
+    goToGalleryIndex(galleryIndex + 1);
+  };
+
   const pointerNorm = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = viewerRef.current?.getBoundingClientRect();
     if (!rect) return null;
@@ -261,17 +281,52 @@ export function AdminMediaLibrary() {
     }
   };
 
+  const onTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (drawMode) return;
+    const touch = event.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+    touchMovedRef.current = false;
+  };
+
+  const onTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (drawMode) return;
+    if (!touchStartRef.current) return;
+    const touch = event.touches[0];
+    const dx = touch.clientX - touchStartRef.current.x;
+    const dy = touch.clientY - touchStartRef.current.y;
+    if (Math.abs(dx) > 18 && Math.abs(dx) > Math.abs(dy)) {
+      touchMovedRef.current = true;
+    }
+  };
+
+  const onTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (drawMode) return;
+    if (!touchStartRef.current || !touchMovedRef.current) {
+      touchStartRef.current = null;
+      return;
+    }
+    const touch = event.changedTouches[0];
+    const dx = touch.clientX - touchStartRef.current.x;
+    const dy = touch.clientY - touchStartRef.current.y;
+    touchStartRef.current = null;
+    touchMovedRef.current = false;
+    if (Math.abs(dx) < 40 || Math.abs(dx) <= Math.abs(dy)) {
+      return;
+    }
+    if (dx < 0) {
+      goNext();
+    } else {
+      goPrev();
+    }
+  };
+
   const onCreateThread = async (event: FormEvent) => {
     event.preventDefault();
     if (!activeFile || !newThreadText.trim()) return;
-    const bounds = drawBoundsFromPoints(drawPathDraft);
     const body: Record<string, unknown> = {
       fileId: activeFile.id,
       text: injectDrawAnnotation(newThreadText.trim(), drawPathDraft)
     };
-    if (bounds) {
-      Object.assign(body, bounds);
-    }
     const response = await fetch("/api/media/threads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -444,6 +499,25 @@ export function AdminMediaLibrary() {
                 <p className="truncate text-sm font-semibold">{activeFile.finalFilename}</p>
                 <button onClick={() => setGalleryIndex(null)} className="btn-ghost h-8 px-2 text-xs">Cerrar</button>
               </div>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <button
+                  onClick={goPrev}
+                  disabled={galleryIndex === null || galleryIndex <= 0}
+                  className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                >
+                  Anterior
+                </button>
+                <p className="text-xs text-muted">
+                  {galleryIndex === null ? "-" : galleryIndex + 1}/{filteredFiles.length}
+                </p>
+                <button
+                  onClick={goNext}
+                  disabled={galleryIndex === null || galleryIndex >= filteredFiles.length - 1}
+                  className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                >
+                  Siguiente
+                </button>
+              </div>
               <div className="mb-2 flex items-center gap-2">
                 <button onClick={() => setDrawMode((v) => !v)} className={`h-8 rounded-xl px-3 text-xs font-semibold ${drawMode ? "bg-primary text-white" : "border border-line bg-white text-muted"}`}>
                   {drawMode ? "Lápiz ON" : "Dibujar corrección"}
@@ -467,33 +541,37 @@ export function AdminMediaLibrary() {
                 onPointerMove={onDrawMove}
                 onPointerUp={onDrawUp}
                 onPointerLeave={onDrawUp}
+                onTouchStart={onTouchStart}
+                onTouchMove={onTouchMove}
+                onTouchEnd={onTouchEnd}
               >
                 {activeFile.kind === "PHOTO" ? (
                   <img src={`https://drive.google.com/thumbnail?id=${activeFile.driveFileId}&sz=w2000`} alt={activeFile.finalFilename} className="mx-auto max-h-[75vh] w-auto object-contain" />
                 ) : (
                   <video controls className="mx-auto max-h-[75vh] w-full"><source src={activeFile.downloadUrl} type={activeFile.mimeType} /></video>
                 )}
-                {threads.filter((thread) => thread.zoneX !== null && thread.zoneY !== null && thread.zoneW !== null && thread.zoneH !== null).map((thread) => (
-                  <div key={thread.id} className={`pointer-events-none absolute border-2 ${thread.resolvedAt ? "border-emerald-500" : "border-amber-500"}`} style={{ left: `${(thread.zoneX || 0) * 100}%`, top: `${(thread.zoneY || 0) * 100}%`, width: `${(thread.zoneW || 0) * 100}%`, height: `${(thread.zoneH || 0) * 100}%` }} />
-                ))}
-                {threads.map((thread) => {
-                  const firstMessage = thread.messages[0]?.text || "";
-                  const points = splitDrawAnnotation(firstMessage).points;
-                  const d = pointsToSvgPath(points);
-                  if (!d) return null;
-                  return (
-                    <svg key={`path-${thread.id}`} viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
-                      <path
-                        d={d}
-                        fill="none"
-                        stroke={thread.resolvedAt ? "#16a34a" : "#f59e0b"}
-                        strokeWidth={1}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  );
-                })}
+                {threads.flatMap((thread) =>
+                  thread.messages.map((msg) => {
+                    if (msg.fileVersionNumber === null || msg.fileVersionNumber !== activeFile.versionNumber) {
+                      return null;
+                    }
+                    const points = splitDrawAnnotation(msg.text).points;
+                    const d = pointsToSvgPath(points);
+                    if (!d) return null;
+                    return (
+                      <svg key={`path-${thread.id}-${msg.id}`} viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
+                        <path
+                          d={d}
+                          fill="none"
+                          stroke={thread.resolvedAt ? "#16a34a" : "#f59e0b"}
+                          strokeWidth={1}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    );
+                  })
+                )}
                 {drawPathDraft.length >= 2 ? (
                   <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
                     <path d={pointsToSvgPath(drawPathDraft)} fill="none" stroke="#0f6cbd" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />

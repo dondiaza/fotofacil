@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { StatusChip } from "@/components/status-chip";
 import { toUserError, uploadVideoResumable } from "@/lib/client-video-upload";
-import { drawBoundsFromPoints, injectDrawAnnotation, pointsToSvgPath, splitDrawAnnotation, type DrawPoint } from "@/lib/draw-annotation";
+import { injectDrawAnnotation, pointsToSvgPath, splitDrawAnnotation, type DrawPoint } from "@/lib/draw-annotation";
 
 type Role = "STORE" | "CLUSTER" | "SUPERADMIN";
 
@@ -53,6 +53,7 @@ type ThreadMessage = {
   authorRole: Role;
   text: string;
   createdAt: string;
+  fileId: string | null;
   fileVersionNumber: number | null;
 };
 
@@ -255,14 +256,10 @@ export function StoreMediaReview() {
     event.preventDefault();
     if (!activeFile || !newThreadText.trim()) return;
     const linkedFileId = activeVersion?.id || activeFile.id;
-    const bounds = drawBoundsFromPoints(drawPathDraft);
     const body: Record<string, unknown> = {
       fileId: linkedFileId,
       text: injectDrawAnnotation(newThreadText.trim(), drawPathDraft)
     };
-    if (bounds) {
-      Object.assign(body, bounds);
-    }
     const response = await fetch("/api/media/threads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -474,27 +471,28 @@ export function StoreMediaReview() {
                 ) : (
                   <video controls className="mx-auto max-h-[75vh] w-full"><source src={activeVersion?.downloadUrl || activeFile.downloadUrl} type={activeVersion?.mimeType || activeFile.mimeType} /></video>
                 )}
-                {threads.filter((thread) => thread.zoneX !== null && thread.zoneY !== null && thread.zoneW !== null && thread.zoneH !== null).map((thread) => (
-                  <div key={thread.id} className={`pointer-events-none absolute border-2 ${thread.resolvedAt ? "border-emerald-500" : "border-amber-500"}`} style={{ left: `${(thread.zoneX || 0) * 100}%`, top: `${(thread.zoneY || 0) * 100}%`, width: `${(thread.zoneW || 0) * 100}%`, height: `${(thread.zoneH || 0) * 100}%` }} />
-                ))}
-                {threads.map((thread) => {
-                  const firstMessage = thread.messages[0]?.text || "";
-                  const points = splitDrawAnnotation(firstMessage).points;
-                  const d = pointsToSvgPath(points);
-                  if (!d) return null;
-                  return (
-                    <svg key={`path-${thread.id}`} viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
-                      <path
-                        d={d}
-                        fill="none"
-                        stroke={thread.resolvedAt ? "#16a34a" : "#f59e0b"}
-                        strokeWidth={1}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  );
-                })}
+                {threads.flatMap((thread) =>
+                  thread.messages.map((msg) => {
+                    if (msg.fileVersionNumber === null || msg.fileVersionNumber !== activeVersion?.versionNumber) {
+                      return null;
+                    }
+                    const points = splitDrawAnnotation(msg.text).points;
+                    const d = pointsToSvgPath(points);
+                    if (!d) return null;
+                    return (
+                      <svg key={`path-${thread.id}-${msg.id}`} viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
+                        <path
+                          d={d}
+                          fill="none"
+                          stroke={thread.resolvedAt ? "#16a34a" : "#f59e0b"}
+                          strokeWidth={1}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    );
+                  })
+                )}
                 {drawPathDraft.length >= 2 ? (
                   <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full">
                     <path d={pointsToSvgPath(drawPathDraft)} fill="none" stroke="#0f6cbd" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
