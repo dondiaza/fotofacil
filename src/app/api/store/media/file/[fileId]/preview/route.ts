@@ -1,0 +1,49 @@
+import { badRequest, forbidden, unauthorized } from "@/lib/http";
+import { prisma } from "@/lib/prisma";
+import { requireStore } from "@/lib/request-auth";
+import { downloadDriveFile } from "@/lib/drive";
+
+type Context = {
+  params: Promise<{ fileId: string }>;
+};
+
+export async function GET(_: Request, context: Context) {
+  const auth = await requireStore();
+  if (!auth) {
+    return unauthorized();
+  }
+
+  const { fileId } = await context.params;
+  const file = await prisma.uploadFile.findUnique({
+    where: { id: fileId },
+    select: {
+      id: true,
+      uploadDay: {
+        select: {
+          storeId: true
+        }
+      },
+      driveFileId: true,
+      mimeType: true
+    }
+  });
+
+  if (!file) {
+    return badRequest("Archivo no encontrado");
+  }
+  if (file.uploadDay.storeId !== auth.store.id) {
+    return forbidden();
+  }
+
+  const downloaded = await downloadDriveFile(file.driveFileId);
+  const body = new Uint8Array(downloaded.buffer);
+
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": file.mimeType || downloaded.mimeType || "application/octet-stream",
+      "Content-Disposition": "inline",
+      "Cache-Control": "private, max-age=60"
+    }
+  });
+}

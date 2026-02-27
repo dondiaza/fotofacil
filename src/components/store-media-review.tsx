@@ -21,6 +21,7 @@ type StoreFile = {
   threadCount: number;
   unreadThreadCount: number;
   thumbUrl: string | null;
+  previewUrl?: string | null;
   downloadUrl: string;
   versions: Array<{
     id: string;
@@ -32,6 +33,7 @@ type StoreFile = {
     bytes: number;
     createdAt: string;
     thumbUrl: string | null;
+    previewUrl?: string | null;
     downloadUrl: string;
   }>;
 };
@@ -511,7 +513,7 @@ export function StoreMediaReview() {
                   <img
                     ref={imageRef}
                     onLoad={syncOverlayBox}
-                    src={`https://drive.google.com/thumbnail?id=${activeVersion.driveFileId}&sz=w2000`}
+                    src={activeVersion.previewUrl || activeVersion.thumbUrl || activeFile.previewUrl || activeFile.thumbUrl || activeFile.downloadUrl}
                     alt={activeVersion.finalFilename}
                     className="mx-auto max-h-[75vh] w-auto object-contain"
                   />

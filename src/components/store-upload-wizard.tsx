@@ -133,6 +133,7 @@ export function StoreUploadWizard() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [guidedMode, setGuidedMode] = useState(true);
+  const [guidedSlotIndex, setGuidedSlotIndex] = useState(0);
 
   const loadDay = async (date: string) => {
     setLoading(true);
@@ -184,21 +185,24 @@ export function StoreUploadWizard() {
     return counts;
   }, [queue]);
 
-  const nextRequiredSlot = useMemo(() => {
-    for (const slot of requiredSlots) {
-      const pending = queuedPhotoCountsBySlot[slot.name] || 0;
-      if ((slot.count || 0) + pending < 1) {
-        return slot.name;
-      }
-    }
-    return null;
-  }, [requiredSlots, queuedPhotoCountsBySlot]);
-
   const additionalGroupName = useMemo(
     () => requiredSlots.find((slot) => slot.name === "GENERAL")?.name || requiredSlots[0]?.name || "GENERAL",
     [requiredSlots]
   );
-  const nextPhotoLabel = nextRequiredSlot || additionalGroupName;
+  const guidedSlotName = requiredSlots[guidedSlotIndex]?.name || additionalGroupName;
+  const guidedProgress = useMemo(
+    () =>
+      requiredSlots.map((slot) => {
+        const pending = queuedPhotoCountsBySlot[slot.name] || 0;
+        const done = (slot.count || 0) + pending > 0;
+        return { name: slot.name, done };
+      }),
+    [requiredSlots, queuedPhotoCountsBySlot]
+  );
+
+  useEffect(() => {
+    setGuidedSlotIndex(0);
+  }, [dateKey, requiredSlots.length]);
 
   const removeFromQueue = (id: string) => {
     setQueue((prev) => {
@@ -235,28 +239,9 @@ export function StoreUploadWizard() {
       return;
     }
 
-    const existingCounts: Record<string, number> = {};
-    for (const slot of requiredSlots) {
-      existingCounts[slot.name] = slot.count || 0;
-    }
-    for (const key of Object.keys(queuedPhotoCountsBySlot)) {
-      existingCounts[key] = (existingCounts[key] || 0) + queuedPhotoCountsBySlot[key];
-    }
-
     const additions: QueueItem[] = [];
     for (const file of Array.from(files)) {
-      let slotName = "";
-      for (const slot of requiredSlots) {
-        if ((existingCounts[slot.name] || 0) < 1) {
-          slotName = slot.name;
-          break;
-        }
-      }
-      if (!slotName) {
-        slotName = additionalGroupName;
-      }
-      existingCounts[slotName] = (existingCounts[slotName] || 0) + 1;
-      additions.push(buildQueueItem(file, "PHOTO", slotName));
+      additions.push(buildQueueItem(file, "PHOTO", guidedSlotName));
     }
 
     setQueue((prev) => [...prev, ...additions]);
@@ -423,22 +408,53 @@ export function StoreUploadWizard() {
         {guidedMode ? (
           <div className="space-y-2">
             <p className="text-sm text-muted">
-              Siguiente título: <strong>{nextPhotoLabel}</strong>
+              Grupo actual: <strong>{guidedSlotName}</strong>
             </p>
-            {nextRequiredSlot ? (
-              <p className="text-xs text-muted">
-                Captura en orden de requeridas. Cuando completes todas, las nuevas quedarán como adicionales.
-              </p>
-            ) : (
-              <p className="text-xs text-muted">Requeridas completas. Las nuevas se asignarán a {additionalGroupName}.</p>
-            )}
+            <p className="text-xs text-muted">
+              Empieza por {requiredSlots[0]?.name || guidedSlotName}. Puedes subir más del mismo grupo o pasar al siguiente.
+            </p>
+            {requiredSlots.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setGuidedSlotIndex((prev) => Math.max(0, prev - 1))}
+                  disabled={guidedSlotIndex <= 0}
+                  className="btn-ghost h-8 px-3 text-xs disabled:opacity-50"
+                >
+                  Grupo anterior
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGuidedSlotIndex((prev) => Math.min(requiredSlots.length - 1, prev + 1))}
+                  disabled={guidedSlotIndex >= requiredSlots.length - 1}
+                  className="btn-ghost h-8 px-3 text-xs disabled:opacity-50"
+                >
+                  Siguiente grupo
+                </button>
+                <span className="chip bg-slate-100 text-muted">
+                  {guidedSlotIndex + 1}/{requiredSlots.length}
+                </span>
+              </div>
+            ) : null}
+            {guidedProgress.length > 0 ? (
+              <div className="flex flex-wrap gap-1">
+                {guidedProgress.map((slot) => (
+                  <span
+                    key={slot.name}
+                    className={`chip ${slot.done ? "bg-emerald-50 text-success" : "bg-slate-100 text-muted"}`}
+                  >
+                    {slot.name}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               <label className="btn-primary h-10 cursor-pointer px-3 text-xs">
-                Capturar siguiente
+                Capturar ({guidedSlotName})
                 <input hidden type="file" accept="image/*" capture="environment" onChange={(event) => addGuidedPhotos(event.target.files)} />
               </label>
               <label className="btn-ghost h-10 cursor-pointer px-3 text-xs">
-                Subir archivo foto
+                Subir archivo ({guidedSlotName})
                 <input hidden type="file" accept="image/*" onChange={(event) => addGuidedPhotos(event.target.files)} />
               </label>
             </div>

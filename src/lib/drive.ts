@@ -373,3 +373,11 @@ export async function downloadDriveFile(fileId: string) {
     buffer: Buffer.from(media.data as ArrayBuffer)
   };
 }
+
+export async function deleteDriveFile(fileId: string) {
+  const drive = getDriveClient();
+  await drive.files.delete({
+    fileId,
+    supportsAllDrives: true
+  });
+}

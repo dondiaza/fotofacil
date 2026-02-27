@@ -25,6 +25,10 @@ const bulkSchema = z.object({
   )
 });
 
+const deleteSchema = z.object({
+  storeId: z.string().min(1)
+});
+
 export async function PATCH(request: Request) {
   const admin = await requireAdmin();
   if (!admin) {
@@ -183,6 +187,68 @@ export async function PUT(request: Request) {
     userId: admin.uid,
     payload: {
       count: parsed.data.items.length
+    }
+  });
+
+  return Response.json({ ok: true });
+}
+
+export async function DELETE(request: Request) {
+  const admin = await requireAdmin();
+  if (!admin) {
+    return unauthorized();
+  }
+
+  const body = await request.json().catch(() => null);
+  const parsed = deleteSchema.safeParse(body);
+  if (!parsed.success) {
+    return badRequest(parsed.error.issues.map((issue) => issue.message).join(", "));
+  }
+
+  const store = await prisma.store.findUnique({
+    where: { id: parsed.data.storeId },
+    select: {
+      id: true,
+      storeCode: true
+    }
+  });
+  if (!store) {
+    return badRequest("Tienda no encontrada");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.user.deleteMany({
+      where: {
+        role: "STORE",
+        storeId: store.id
+      }
+    });
+
+    await tx.uploadRule.deleteMany({
+      where: {
+        storeId: store.id
+      }
+    });
+
+    await tx.slotTemplate.deleteMany({
+      where: {
+        storeId: store.id
+      }
+    });
+
+    await tx.store.delete({
+      where: {
+        id: store.id
+      }
+    });
+  });
+
+  await writeAuditLog({
+    action: "ADMIN_STORE_DELETED",
+    userId: admin.uid,
+    storeId: store.id,
+    payload: {
+      storeCode: store.storeCode
     }
   });
 

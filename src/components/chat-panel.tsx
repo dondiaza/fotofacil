@@ -9,6 +9,7 @@ type MessageItem = {
   fromRole: Role;
   text: string;
   attachmentWebViewLink: string | null;
+  attachmentPreviewUrl?: string | null;
   createdAt: string;
 };
 
@@ -27,6 +28,7 @@ export function ChatPanel({ storeId, currentRole, title, receiverLabel }: ChatPa
   const [text, setText] = useState("");
   const [attachment, setAttachment] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
 
   const loadMessages = async (cursorArg?: string | null) => {
     const query = cursorArg ? `?cursor=${cursorArg}` : "";
@@ -149,7 +151,19 @@ export function ChatPanel({ storeId, currentRole, title, receiverLabel }: ChatPa
               </p>
               <p className="mb-1 text-[11px] opacity-75">{new Date(msg.createdAt).toLocaleString()}</p>
               {msg.text ? <p className="whitespace-pre-wrap">{msg.text}</p> : null}
-              {msg.attachmentWebViewLink ? (
+              {msg.attachmentPreviewUrl ? (
+                <button
+                  type="button"
+                  onClick={() => setViewerUrl(msg.attachmentPreviewUrl || null)}
+                  className="mt-1 block"
+                >
+                  <img
+                    src={msg.attachmentPreviewUrl}
+                    alt="Adjunto"
+                    className="h-20 w-20 rounded-lg border border-white/30 object-cover"
+                  />
+                </button>
+              ) : msg.attachmentWebViewLink ? (
                 <a
                   className={`mt-1 inline-block text-xs font-semibold ${mine ? "text-white underline" : "text-primary hover:underline"}`}
                   href={msg.attachmentWebViewLink}
@@ -198,6 +212,19 @@ export function ChatPanel({ storeId, currentRole, title, receiverLabel }: ChatPa
           {sending ? "Enviando..." : "Enviar"}
         </button>
       </form>
+
+      {viewerUrl ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/75 p-4">
+          <article className="w-full max-w-4xl rounded-xl bg-white p-3">
+            <div className="mb-2 flex justify-end">
+              <button className="btn-ghost h-8 px-3 text-xs" onClick={() => setViewerUrl(null)}>
+                Cerrar
+              </button>
+            </div>
+            <img src={viewerUrl} alt="Adjunto completo" className="max-h-[78vh] w-full rounded-lg object-contain" />
+          </article>
+        </div>
+      ) : null}
     </section>
   );
 }

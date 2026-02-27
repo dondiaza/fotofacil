@@ -236,6 +236,48 @@ export function AdminAccountManager() {
     setStoreResetDrafts((prev) => ({ ...prev, [storeId]: "" }));
   };
 
+  const deleteCluster = async (clusterId: string, code: string) => {
+    const confirmed = window.confirm(`Se eliminará el cluster ${code}. Sus tiendas quedarán sin cluster. ¿Continuar?`);
+    if (!confirmed) {
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    const response = await fetch("/api/admin/accounts/clusters", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clusterId })
+    });
+    const json = await response.json();
+    if (!response.ok) {
+      setError(json.error || "No se pudo eliminar cluster");
+      return;
+    }
+    setNotice("Cluster eliminado");
+    await load();
+  };
+
+  const deleteStore = async (storeId: string, storeCode: string) => {
+    const confirmed = window.confirm(`Se eliminará la tienda ${storeCode} con sus datos asociados. ¿Continuar?`);
+    if (!confirmed) {
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    const response = await fetch("/api/admin/accounts/stores", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ storeId })
+    });
+    const json = await response.json();
+    if (!response.ok) {
+      setError(json.error || "No se pudo eliminar tienda");
+      return;
+    }
+    setNotice("Tienda eliminada");
+    await load();
+  };
+
   const saveAssignments = async () => {
     setSavingAssignments(true);
     setError(null);
@@ -413,6 +455,12 @@ export function AdminAccountManager() {
                   </button>
                 </div>
                 <p className="mt-2 text-xs text-muted">{cluster.stores.length} tienda(s) vinculadas</p>
+                <button
+                  onClick={() => void deleteCluster(cluster.id, cluster.code)}
+                  className="mt-2 h-8 rounded-xl border border-red-200 bg-red-50 px-3 text-xs font-semibold text-danger"
+                >
+                  Eliminar cluster
+                </button>
               </li>
             ))}
           </ul>
@@ -475,6 +523,12 @@ export function AdminAccountManager() {
                     Guardar clave
                   </button>
                 </div>
+                <button
+                  onClick={() => void deleteStore(store.id, store.storeCode)}
+                  className="mt-2 h-8 rounded-xl border border-red-200 bg-red-50 px-3 text-xs font-semibold text-danger"
+                >
+                  Eliminar tienda
+                </button>
               </li>
             ))}
           </ul>

@@ -23,6 +23,10 @@ const patchSchema = z.object({
   resetPassword: z.string().min(8).optional()
 });
 
+const deleteSchema = z.object({
+  clusterId: z.string().min(1)
+});
+
 function randomPassword(size = 12) {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
   let value = "";
@@ -221,6 +225,78 @@ export async function PATCH(request: Request) {
     userId: admin.uid,
     payload: {
       clusterId: cluster.id
+    }
+  });
+
+  return Response.json({ ok: true });
+}
+
+export async function DELETE(request: Request) {
+  const admin = await requireAdmin();
+  if (!admin) {
+    return unauthorized();
+  }
+
+  const body = await request.json().catch(() => null);
+  const parsed = deleteSchema.safeParse(body);
+  if (!parsed.success) {
+    return badRequest(parsed.error.issues.map((issue) => issue.message).join(", "));
+  }
+
+  const cluster = await prisma.cluster.findUnique({
+    where: { id: parsed.data.clusterId },
+    select: { id: true, code: true }
+  });
+  if (!cluster) {
+    return badRequest("Cluster no encontrado");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.store.updateMany({
+      where: {
+        clusterId: cluster.id
+      },
+      data: {
+        clusterId: null
+      }
+    });
+
+    await tx.user.updateMany({
+      where: {
+        role: "STORE",
+        clusterId: cluster.id
+      },
+      data: {
+        clusterId: null
+      }
+    });
+
+    await tx.user.deleteMany({
+      where: {
+        role: "CLUSTER",
+        clusterId: cluster.id
+      }
+    });
+
+    await tx.uploadRule.deleteMany({
+      where: {
+        clusterId: cluster.id
+      }
+    });
+
+    await tx.cluster.delete({
+      where: {
+        id: cluster.id
+      }
+    });
+  });
+
+  await writeAuditLog({
+    action: "ADMIN_CLUSTER_DELETED",
+    userId: admin.uid,
+    payload: {
+      clusterId: cluster.id,
+      code: cluster.code
     }
   });
 

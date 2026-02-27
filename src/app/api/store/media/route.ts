@@ -136,7 +136,8 @@ export async function GET(request: Request) {
       driveFolderId: uploadDay.driveFolderId,
       files: uploadDay.files.map((file) => ({
         ...file,
-        thumbUrl: file.kind === "PHOTO" ? `https://drive.google.com/thumbnail?id=${file.driveFileId}` : null,
+        thumbUrl: file.kind === "PHOTO" ? `/api/store/media/file/${file.id}/preview` : null,
+        previewUrl: file.kind === "PHOTO" ? `/api/store/media/file/${file.id}/preview` : null,
         downloadUrl: `/api/store/media/file/${file.id}/download`,
         threadCount: threadByGroup[file.versionGroupId] || 0,
         unreadThreadCount: unreadByGroup[file.versionGroupId] || 0,
@@ -149,7 +150,8 @@ export async function GET(request: Request) {
           driveFileId: entry.driveFileId,
           bytes: entry.bytes,
           createdAt: entry.createdAt,
-          thumbUrl: entry.kind === "PHOTO" ? `https://drive.google.com/thumbnail?id=${entry.driveFileId}` : null,
+          thumbUrl: entry.kind === "PHOTO" ? `/api/store/media/file/${entry.id}/preview` : null,
+          previewUrl: entry.kind === "PHOTO" ? `/api/store/media/file/${entry.id}/preview` : null,
           downloadUrl: `/api/store/media/file/${entry.id}/download`
         }))
       }))

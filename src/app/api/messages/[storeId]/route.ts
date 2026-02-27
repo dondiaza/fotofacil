@@ -103,7 +103,10 @@ export async function GET(request: Request, context: Context) {
   }
 
   return Response.json({
-    items: sorted,
+    items: sorted.map((item) => ({
+      ...item,
+      attachmentPreviewUrl: item.attachmentDriveFileId ? `/api/messages/attachment/${item.id}` : null
+    })),
     nextCursor
   });
 }

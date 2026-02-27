@@ -119,6 +119,7 @@ export function AdminMediaLibrary() {
   const [threadsError, setThreadsError] = useState<string | null>(null);
   const [threadsLoading, setThreadsLoading] = useState(false);
   const [busyValidateId, setBusyValidateId] = useState<string | null>(null);
+  const [busyDeleteId, setBusyDeleteId] = useState<string | null>(null);
   const [busyValidateAll, setBusyValidateAll] = useState(false);
   const [showUnreadPopup, setShowUnreadPopup] = useState(false);
 
@@ -190,6 +191,19 @@ export function AdminMediaLibrary() {
         uploadDay: {
           ...prev.uploadDay,
           files: prev.uploadDay.files.map((item) => (item.id === fileId ? { ...item, ...patch } : item))
+        }
+      };
+    });
+  };
+
+  const removeFileFromState = (fileId: string) => {
+    setPayload((prev) => {
+      if (!prev?.uploadDay) return prev;
+      return {
+        ...prev,
+        uploadDay: {
+          ...prev.uploadDay,
+          files: prev.uploadDay.files.filter((item) => item.id !== fileId)
         }
       };
     });
@@ -433,6 +447,32 @@ export function AdminMediaLibrary() {
     setBusyValidateId(null);
   };
 
+  const deleteFile = async (file: MediaFile) => {
+    setBusyDeleteId(file.id);
+    setThreadsError(null);
+    setError(null);
+    try {
+      const response = await fetch(`/api/media/file/${file.id}`, {
+        method: "DELETE"
+      });
+      const json = await parseJson(response);
+      if (!response.ok) {
+        setError((json as { error?: string } | null)?.error || "No se pudo eliminar el archivo");
+        return;
+      }
+      removeFileFromState(file.id);
+      await load(selectedStoreId, date);
+      if (activeFile?.id === file.id) {
+        setGalleryIndex(null);
+        setSelectedVersionId(null);
+      }
+    } catch {
+      setError("Error de conexión al eliminar archivo");
+    } finally {
+      setBusyDeleteId(null);
+    }
+  };
+
   const validateAllDay = async () => {
     if (!payload?.uploadDay || !selectedStoreId) return;
     setBusyValidateAll(true);
@@ -565,6 +605,13 @@ export function AdminMediaLibrary() {
                   </button>
                   <a href={file.downloadUrl} className="btn-ghost h-9 px-3 text-xs">Descargar</a>
                   <a href={driveFilePreviewLink(file.driveFileId)} target="_blank" rel="noreferrer" className="btn-ghost h-9 px-3 text-xs">Drive</a>
+                  <button
+                    onClick={() => void deleteFile(file)}
+                    disabled={busyDeleteId === file.id}
+                    className="h-9 rounded-xl border border-red-200 bg-red-50 px-3 text-xs font-semibold text-danger disabled:opacity-50"
+                  >
+                    {busyDeleteId === file.id ? "Eliminando..." : "Eliminar"}
+                  </button>
                 </div>
               </article>
             ))}
@@ -633,6 +680,13 @@ export function AdminMediaLibrary() {
                   }`}
                 >
                   {activeFile.validatedAt ? "Quitar validación" : "Validar"}
+                </button>
+                <button
+                  onClick={() => void deleteFile(activeFile)}
+                  disabled={busyDeleteId === activeFile.id}
+                  className="h-8 rounded-xl border border-red-200 bg-red-50 px-2 text-xs font-semibold text-danger disabled:opacity-50"
+                >
+                  {busyDeleteId === activeFile.id ? "Eliminando..." : "Eliminar"}
                 </button>
               </div>
               {activeFile.versions.length > 1 ? (
