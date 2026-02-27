@@ -1,5 +1,5 @@
-import bcrypt from "bcryptjs";
 import { z } from "zod";
+import bcrypt from "bcryptjs";
 import { hashPassword } from "@/lib/auth";
 import { badRequest, unauthorized } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
@@ -7,7 +7,6 @@ import { requireAdmin } from "@/lib/request-auth";
 import { writeAuditLog } from "@/lib/audit";
 
 const payloadSchema = z.object({
-  currentPassword: z.string().min(1),
   newPassword: z.string().min(8).max(128)
 });
 
@@ -33,11 +32,6 @@ export async function PUT(request: Request) {
 
   if (!user) {
     return unauthorized();
-  }
-
-  const currentOk = await bcrypt.compare(parsed.data.currentPassword, user.passwordHash);
-  if (!currentOk) {
-    return badRequest("La contraseña actual no es correcta");
   }
 
   const sameAsCurrent = await bcrypt.compare(parsed.data.newPassword, user.passwordHash);

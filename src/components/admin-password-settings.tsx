@@ -3,7 +3,6 @@
 import { FormEvent, useState } from "react";
 
 export function AdminPasswordSettings() {
-  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [repeatPassword, setRepeatPassword] = useState("");
   const [saving, setSaving] = useState(false);
@@ -30,7 +29,6 @@ export function AdminPasswordSettings() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          currentPassword,
           newPassword
         })
       });
@@ -40,7 +38,6 @@ export function AdminPasswordSettings() {
         return;
       }
 
-      setCurrentPassword("");
       setNewPassword("");
       setRepeatPassword("");
       setMessage("Contraseña actualizada");
@@ -55,10 +52,6 @@ export function AdminPasswordSettings() {
     <section className="grid gap-4 lg:grid-cols-[460px_1fr]">
       <form onSubmit={onSubmit} className="panel space-y-3 p-4">
         <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Cambiar contraseña</p>
-        <label className="block space-y-1">
-          <span className="text-xs text-muted">Contraseña actual</span>
-          <input className="input" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
-        </label>
         <label className="block space-y-1">
           <span className="text-xs text-muted">Nueva contraseña</span>
           <input className="input" type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
