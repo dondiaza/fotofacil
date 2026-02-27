@@ -3,6 +3,7 @@
 import { FormEvent, useMemo, useState } from "react";
 import { ChatPanel } from "@/components/chat-panel";
 import { StatusChip } from "@/components/status-chip";
+import { parseResponseJson } from "@/lib/client-json";
 import { driveFolderLink } from "@/lib/drive-links";
 
 type DayItem = {
@@ -70,15 +71,19 @@ export function AdminStoreDetail({ initial, currentRole }: { initial: StoreDetai
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      const json = await response.json();
+      const json = await parseResponseJson<{ error?: string; item?: StoreDetail }>(response);
       if (!response.ok) {
-        setError(json.error || "No se pudo actualizar");
+        setError(json?.error || "No se pudo actualizar");
         return;
       }
-      const rawDays = Array.isArray(json.item?.uploadDays) ? json.item.uploadDays : [];
-      const updated = {
+      if (!json?.item) {
+        setError("No se recibió respuesta de actualización");
+        return;
+      }
+      const rawDays = Array.isArray(json.item.uploadDays) ? json.item.uploadDays : [];
+      const updated: StoreDetail = {
         ...json.item,
-        uploadDays: rawDays.map((day: { date: string }) => ({
+        uploadDays: rawDays.map((day) => ({
           ...day,
           date: String(day.date).slice(0, 10)
         }))

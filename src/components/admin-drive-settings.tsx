@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { parseResponseJson } from "@/lib/client-json";
 import { driveFolderLink } from "@/lib/drive-links";
 
 type SettingsPayload = {
@@ -31,15 +32,15 @@ export function AdminDriveSettings() {
     setError(null);
     try {
       const response = await fetch("/api/admin/settings/drive", { cache: "no-store" });
-      const json = (await response.json()) as SettingsPayload & { error?: string };
+      const json = await parseResponseJson<SettingsPayload & { error?: string }>(response);
       if (!response.ok) {
-        setError(json.error || "No se pudo cargar configuración");
+        setError(json?.error || "No se pudo cargar configuración");
         return;
       }
-      setFolderId(json.item.driveRootFolderId || "");
-      setEffectiveFolderId(json.item.effectiveDriveRootFolderId || null);
-      setAuthMode(json.item.authMode || "none");
-      setFolderMeta(json.item.rootMeta);
+      setFolderId(json?.item.driveRootFolderId || "");
+      setEffectiveFolderId(json?.item.effectiveDriveRootFolderId || null);
+      setAuthMode(json?.item.authMode || "none");
+      setFolderMeta(json?.item.rootMeta || null);
     } catch {
       setError("Error de conexión");
     } finally {
@@ -64,9 +65,9 @@ export function AdminDriveSettings() {
           driveRootFolderId: folderId.trim()
         })
       });
-      const json = await response.json();
+      const json = await parseResponseJson<{ error?: string }>(response);
       if (!response.ok) {
-        setError(json.error || "No se pudo guardar");
+        setError(json?.error || "No se pudo guardar");
         return;
       }
       setMessage("Configuración de Drive guardada");

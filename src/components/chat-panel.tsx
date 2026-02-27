@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { parseResponseJson } from "@/lib/client-json";
 
 type Role = "STORE" | "CLUSTER" | "SUPERADMIN";
 
@@ -33,11 +34,14 @@ export function ChatPanel({ storeId, currentRole, title, receiverLabel }: ChatPa
   const loadMessages = async (cursorArg?: string | null) => {
     const query = cursorArg ? `?cursor=${cursorArg}` : "";
     const response = await fetch(`/api/messages/${storeId}${query}`, { cache: "no-store" });
-    const json = await response.json();
+    const json = await parseResponseJson<{ items?: MessageItem[]; nextCursor?: string | null; error?: string }>(response);
     if (!response.ok) {
-      throw new Error(json.error || "No se pudieron cargar los mensajes");
+      throw new Error(json?.error || "No se pudieron cargar los mensajes");
     }
-    return json as { items: MessageItem[]; nextCursor: string | null };
+    return {
+      items: json?.items || [],
+      nextCursor: json?.nextCursor ?? null
+    };
   };
 
   const refresh = async () => {
@@ -94,9 +98,9 @@ export function ChatPanel({ storeId, currentRole, title, receiverLabel }: ChatPa
         method: "POST",
         body: formData
       });
-      const json = await response.json();
+      const json = await parseResponseJson<{ error?: string }>(response);
       if (!response.ok) {
-        setError(json.error || "No se pudo enviar el mensaje");
+        setError(json?.error || "No se pudo enviar el mensaje");
         return;
       }
 

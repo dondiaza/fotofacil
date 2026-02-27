@@ -34,6 +34,18 @@ type RulesResponse = {
 
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
+async function parseJson(response: Response) {
+  const raw = await response.text();
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 function requirementFromFlags(photo: boolean, video: boolean): Requirement {
   if (photo && video) return "BOTH";
   if (photo) return "PHOTO";
@@ -86,19 +98,19 @@ export function AdminUploadRules(props: { managerRole: ManagerRole; managerClust
         params.set("clusterId", targetClusterId);
       }
       const response = await fetch(`/api/admin/upload-rules?${params.toString()}`, { cache: "no-store" });
-      const json = (await response.json()) as RulesResponse & { error?: string };
+      const json = (await parseJson(response)) as (RulesResponse & { error?: string }) | null;
       if (!response.ok) {
-        setError(json.error || "No se pudieron cargar reglas");
+        setError(json?.error || "No se pudieron cargar reglas");
         return;
       }
 
-      setStores(json.stores || []);
-      setClusters(json.clusters || []);
-      setRules(json.item.rules || []);
-      if (json.item.scope === "store") {
+      setStores(json?.stores || []);
+      setClusters(json?.clusters || []);
+      setRules(json?.item.rules || []);
+      if (json?.item.scope === "store") {
         setScope("store");
-        setStoreId(json.item.storeId || (json.stores[0]?.id ?? ""));
-      } else if (json.item.scope === "cluster") {
+        setStoreId(json.item.storeId || (json.stores?.[0]?.id ?? ""));
+      } else if (json?.item.scope === "cluster") {
         setScope("cluster");
         setClusterId(
           json.item.clusterId ||
@@ -108,8 +120,8 @@ export function AdminUploadRules(props: { managerRole: ManagerRole; managerClust
         );
       } else {
         setScope("global");
-        if (!storeId && json.stores.length > 0) {
-          setStoreId(json.stores[0].id);
+        if (!storeId && (json?.stores?.length || 0) > 0) {
+          setStoreId(json!.stores[0].id);
         }
       }
     } catch {
@@ -156,9 +168,9 @@ export function AdminUploadRules(props: { managerRole: ManagerRole; managerClust
           rules: rules.map((rule) => ({ weekday: rule.weekday, requirement: rule.requirement }))
         })
       });
-      const json = await response.json();
+      const json = (await parseJson(response)) as { error?: string } | null;
       if (!response.ok) {
-        setError(json.error || "No se pudieron guardar reglas");
+        setError(json?.error || "No se pudieron guardar reglas");
         return;
       }
       setMessage("Reglas guardadas");

@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { StatusChip } from "@/components/status-chip";
+import { parseResponseJson } from "@/lib/client-json";
 
 type StoreItem = {
   id: string;
@@ -36,12 +37,12 @@ export function AdminStoreManager({ managerRole }: { managerRole: ManagerRole })
     setLoading(true);
     try {
       const response = await fetch("/api/admin/stores?includeInactive=true", { cache: "no-store" });
-      const json = await response.json();
-      setRows(json.items || []);
+      const json = await parseResponseJson<{ items?: StoreItem[] }>(response);
+      setRows(json?.items || []);
 
       const globalResponse = await fetch("/api/admin/slot-templates", { cache: "no-store" });
-      const globalJson = await globalResponse.json();
-      const names = (globalJson.items || []).map((slot: { name: string }) => slot.name);
+      const globalJson = await parseResponseJson<{ items?: Array<{ name: string }> }>(globalResponse);
+      const names = (globalJson?.items || []).map((slot) => slot.name);
       if (names.length > 0) {
         setGlobalSlots(names.join(","));
       }
@@ -72,13 +73,13 @@ export function AdminStoreManager({ managerRole }: { managerRole: ManagerRole })
         })
       });
 
-      const json = await response.json();
+      const json = await parseResponseJson<{ error?: string; credentials?: { username: string; password: string } }>(response);
       if (!response.ok) {
-        setError(json.error || "No se pudo crear la tienda");
+        setError(json?.error || "No se pudo crear la tienda");
         return;
       }
 
-      setCreatedCredentials(json.credentials);
+      setCreatedCredentials(json?.credentials || null);
       setName("");
       setStoreCode("");
       setUsername("");
@@ -111,9 +112,9 @@ export function AdminStoreManager({ managerRole }: { managerRole: ManagerRole })
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ slots: payload })
       });
-      const json = await response.json();
+      const json = await parseResponseJson<{ error?: string }>(response);
       if (!response.ok) {
-        setGlobalMessage(json.error || "No se pudo guardar plantilla global");
+        setGlobalMessage(json?.error || "No se pudo guardar plantilla global");
         return;
       }
       setGlobalMessage("Plantilla global actualizada");

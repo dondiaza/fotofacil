@@ -37,6 +37,18 @@ type CsvSummary = {
   errors: string[];
 };
 
+async function parseJson(response: Response) {
+  const raw = await response.text();
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 export function AdminAccountManager() {
   const [clusters, setClusters] = useState<ClusterRow[]>([]);
   const [stores, setStores] = useState<StoreRow[]>([]);
@@ -81,15 +93,15 @@ export function AdminAccountManager() {
     setError(null);
     try {
       const response = await fetch("/api/admin/accounts/overview", { cache: "no-store" });
-      const json = (await response.json()) as OverviewResponse & { error?: string };
+      const json = (await parseJson(response)) as (OverviewResponse & { error?: string }) | null;
       if (!response.ok) {
-        setError(json.error || "No se pudo cargar cuentas");
+        setError(json?.error || "No se pudo cargar cuentas");
         return;
       }
-      setClusters(json.clusters || []);
-      setStores(json.stores || []);
+      setClusters(json?.clusters || []);
+      setStores(json?.stores || []);
       setBulkAssignments(
-        Object.fromEntries((json.stores || []).map((store) => [store.id, store.cluster?.id || ""]))
+        Object.fromEntries(((json?.stores as OverviewResponse["stores"]) || []).map((store) => [store.id, store.cluster?.id || ""]))
       );
     } catch {
       setError("Error de conexión");
@@ -119,13 +131,13 @@ export function AdminAccountManager() {
           password: clusterPassword || undefined
         })
       });
-      const json = await response.json();
+      const json = (await parseJson(response)) as { error?: string; credentials?: { username: string; password: string } } | null;
       if (!response.ok) {
-        setError(json.error || "No se pudo crear cluster");
+        setError(json?.error || "No se pudo crear cluster");
         return;
       }
 
-      setClusterCreds(json.credentials || null);
+      setClusterCreds(json?.credentials || null);
       setNotice("Cluster creado");
       setClusterCode("");
       setClusterName("");
@@ -157,12 +169,12 @@ export function AdminAccountManager() {
           deadlineTime: storeDeadline || undefined
         })
       });
-      const json = await response.json();
+      const json = (await parseJson(response)) as { error?: string; credentials?: { username: string; password: string } } | null;
       if (!response.ok) {
-        setError(json.error || "No se pudo crear tienda");
+        setError(json?.error || "No se pudo crear tienda");
         return;
       }
-      setStoreCreds(json.credentials || null);
+      setStoreCreds(json?.credentials || null);
       setNotice("Tienda creada");
       setStoreName("");
       setStoreCode("");
@@ -187,9 +199,9 @@ export function AdminAccountManager() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ clusterId, ...payload })
     });
-    const json = await response.json();
+    const json = (await parseJson(response)) as { error?: string } | null;
     if (!response.ok) {
-      setError(json.error || "No se pudo actualizar cluster");
+      setError(json?.error || "No se pudo actualizar cluster");
       return;
     }
     setNotice("Cluster actualizado");
@@ -207,9 +219,9 @@ export function AdminAccountManager() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ storeId, ...payload })
     });
-    const json = await response.json();
+    const json = (await parseJson(response)) as { error?: string } | null;
     if (!response.ok) {
-      setError(json.error || "No se pudo actualizar tienda");
+      setError(json?.error || "No se pudo actualizar tienda");
       return;
     }
     setNotice("Tienda actualizada");
@@ -248,9 +260,9 @@ export function AdminAccountManager() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ clusterId })
     });
-    const json = await response.json();
+    const json = (await parseJson(response)) as { error?: string } | null;
     if (!response.ok) {
-      setError(json.error || "No se pudo eliminar cluster");
+      setError(json?.error || "No se pudo eliminar cluster");
       return;
     }
     setNotice("Cluster eliminado");
@@ -269,9 +281,9 @@ export function AdminAccountManager() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ storeId })
     });
-    const json = await response.json();
+    const json = (await parseJson(response)) as { error?: string } | null;
     if (!response.ok) {
-      setError(json.error || "No se pudo eliminar tienda");
+      setError(json?.error || "No se pudo eliminar tienda");
       return;
     }
     setNotice("Tienda eliminada");
@@ -292,9 +304,9 @@ export function AdminAccountManager() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items: payload })
       });
-      const json = await response.json();
+      const json = (await parseJson(response)) as { error?: string } | null;
       if (!response.ok) {
-        setError(json.error || "No se pudieron guardar asignaciones");
+        setError(json?.error || "No se pudieron guardar asignaciones");
         return;
       }
       setNotice("Asignaciones guardadas");
@@ -315,12 +327,17 @@ export function AdminAccountManager() {
       method: "POST",
       body: form
     });
-    const json = await response.json();
+    const json = (await parseJson(response)) as { error?: string; summary?: CsvSummary } | null;
     if (!response.ok) {
-      setError(json.error || `No se pudo importar ${type}`);
+      setError(json?.error || `No se pudo importar ${type}`);
       return;
     }
-    const summary = json.summary as CsvSummary;
+    const summary = (json?.summary as CsvSummary) || {
+      totalRows: 0,
+      createdUsers: 0,
+      updatedUsers: 0,
+      errors: []
+    };
     setImportResult(
       `${type.toUpperCase()}: filas=${summary.totalRows}, creados=${summary.createdClusters ?? summary.createdStores ?? 0}, actualizados=${summary.updatedClusters ?? summary.updatedStores ?? 0}, errores=${summary.errors.length}`
     );
