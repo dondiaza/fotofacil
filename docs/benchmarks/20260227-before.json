@@ -1,0 +1,51 @@
+{
+  "baseUrl": "https://fotofacil.vercel.app",
+  "iterations": 20,
+  "generatedAt": "2026-02-27T13:29:00.299Z",
+  "results": [
+    {
+      "name": "admin_kpis",
+      "path": "/api/admin/kpis?weekStart=2026-02-23",
+      "count": 20,
+      "avgMs": 247.92,
+      "minMs": 226.85,
+      "p50Ms": 245.08,
+      "p95Ms": 303.97,
+      "p99Ms": 303.97,
+      "maxMs": 303.97
+    },
+    {
+      "name": "admin_stores",
+      "path": "/api/admin/stores?date=2026-02-27",
+      "count": 20,
+      "avgMs": 183.85,
+      "minMs": 165.32,
+      "p50Ms": 178.19,
+      "p95Ms": 227.14,
+      "p99Ms": 227.14,
+      "maxMs": 227.14
+    },
+    {
+      "name": "admin_media",
+      "path": "/api/admin/media?date=2026-02-27&storeId=cmm4m5vye000blh049u9nr28h",
+      "count": 20,
+      "avgMs": 184.86,
+      "minMs": 173.11,
+      "p50Ms": 177.82,
+      "p95Ms": 234.63,
+      "p99Ms": 234.63,
+      "maxMs": 234.63
+    },
+    {
+      "name": "store_today",
+      "path": "/api/store/today?date=2026-02-27",
+      "count": 20,
+      "avgMs": 180.83,
+      "minMs": 170.26,
+      "p50Ms": 177.13,
+      "p95Ms": 201.88,
+      "p99Ms": 201.88,
+      "maxMs": 201.88
+    }
+  ]
+}
