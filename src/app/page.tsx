@@ -6,5 +6,5 @@ export default async function Home() {
   if (!session) {
     redirect("/login");
   }
-  redirect(session.role === "SUPERADMIN" ? "/admin" : "/store");
+  redirect(session.role === "STORE" ? "/store" : "/admin");
 }

@@ -1,11 +1,11 @@
 import { parseDateKey, todayDateKey } from "@/lib/date";
 import { badRequest, unauthorized } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/request-auth";
+import { requireManager } from "@/lib/request-auth";
 
 export async function GET(request: Request) {
-  const admin = await requireAdmin();
-  if (!admin) {
+  const manager = await requireManager();
+  if (!manager) {
     return unauthorized();
   }
 
@@ -19,14 +19,24 @@ export async function GET(request: Request) {
     return badRequest((error as Error).message);
   }
 
+  const where = manager.isSuperAdmin
+    ? { date: day }
+    : {
+        date: day,
+        store: {
+          clusterId: manager.clusterId
+        }
+      };
+
   const items = await prisma.alert.findMany({
-    where: { date: day },
+    where,
     include: {
       store: {
         select: {
           id: true,
           name: true,
-          storeCode: true
+          storeCode: true,
+          clusterId: true
         }
       }
     },

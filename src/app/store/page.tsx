@@ -10,7 +10,7 @@ import { getStoreDayView } from "@/lib/store-service";
 
 export default async function StoreHomePage() {
   const { store } = await requireStorePage();
-  const today = await getStoreDayView(store.id, new Date());
+  const today = await getStoreDayView(store.id, store.clusterId ?? null, new Date());
   const history = await prisma.uploadDay.findMany({
     where: {
       storeId: store.id,
@@ -27,7 +27,7 @@ export default async function StoreHomePage() {
   const unread = await prisma.message.count({
     where: {
       storeId: store.id,
-      fromRole: "SUPERADMIN",
+      NOT: { fromRole: "STORE" },
       readAt: null
     }
   });

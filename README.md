@@ -7,7 +7,7 @@ MVP fullstack mobile-first (PWA) para tiendas que suben fotos diarias con organi
 - Frontend + backend: `Next.js (App Router) + TypeScript + Tailwind`
 - BD: `SQLite local (MVP rápido) + Prisma`
 - Auth: sesión JWT en cookie `httpOnly` + middleware por rol
-- Drive: `Google Drive API` con Service Account (backend-only)
+- Drive: `Google Drive API` con OAuth backend (o Service Account)
 - Jobs: endpoint cron protegido (`/api/cron/daily-check-missing-uploads`)
 - PWA: `manifest.webmanifest + service worker`
 
@@ -72,6 +72,9 @@ CRON_SECRET="..."
 DEFAULT_ADMIN_EMAIL="admin@fotofacil.local"
 DEFAULT_ADMIN_PASSWORD="ChangeMe123!"
 
+GOOGLE_OAUTH_CLIENT_ID=""
+GOOGLE_OAUTH_CLIENT_SECRET=""
+GOOGLE_OAUTH_REFRESH_TOKEN=""
 GOOGLE_SERVICE_ACCOUNT_EMAIL=""
 GOOGLE_PRIVATE_KEY=""
 GOOGLE_DRIVE_ROOT_FOLDER_ID=""
@@ -119,13 +122,37 @@ Si quieres abrir desde móvil en la misma red:
 
 ## Configuración Google Drive
 
-1. Crear Service Account en Google Cloud y habilitar Drive API.
-2. Compartir la carpeta raíz de Drive (`GOOGLE_DRIVE_ROOT_FOLDER_ID`) con el email de la Service Account con permisos de editor.
+1. Habilitar Google Drive API en Google Cloud.
+2. Modo recomendado (My Drive sin login por tienda): OAuth backend.
 3. Setear:
+   - `GOOGLE_OAUTH_CLIENT_ID`
+   - `GOOGLE_OAUTH_CLIENT_SECRET`
+   - `GOOGLE_OAUTH_REFRESH_TOKEN` (cuenta Google con acceso de edición a la carpeta raíz)
+   - `GOOGLE_DRIVE_ROOT_FOLDER_ID`
+4. Modo alternativo: Service Account.
+5. Compartir la carpeta raíz con `GOOGLE_SERVICE_ACCOUNT_EMAIL` y setear:
    - `GOOGLE_SERVICE_ACCOUNT_EMAIL`
    - `GOOGLE_PRIVATE_KEY` (con `\n` escapados si va en una línea)
    - `GOOGLE_DRIVE_ROOT_FOLDER_ID`
-4. Opcional: `GOOGLE_IMPERSONATE_USER` si usas domain-wide delegation.
+6. Opcional (solo Service Account): `GOOGLE_IMPERSONATE_USER` si usas domain-wide delegation.
+
+Para obtener `GOOGLE_OAUTH_REFRESH_TOKEN` (una sola vez):
+
+1. Generar URL de consentimiento:
+   - `with-node.cmd node scripts/drive-oauth.mjs auth-url --client-json "C:\ruta\client_secret.json" --redirect-uri "https://www.fotofacil.panojotro.com"`
+2. Abrir esa URL en el navegador y aceptar permisos.
+3. Tomar el `code` del callback.
+4. Intercambiar por tokens:
+   - `with-node.cmd node scripts/drive-oauth.mjs exchange "<CODE>" --client-json "C:\ruta\client_secret.json" --redirect-uri "https://www.fotofacil.panojotro.com"`
+5. Guardar `refresh_token` en `GOOGLE_OAUTH_REFRESH_TOKEN`.
+
+Alternativa recomendada (automática, evita copiar `code`):
+
+1. Ejecuta:
+   - `with-node.cmd node scripts/drive-oauth-local-server.mjs --client-json "C:\ruta\client_secret.json"`
+2. Se abrirá el navegador, acepta permisos.
+3. El script captura el callback y guarda tokens en `.tmp_drive_oauth_tokens.json`.
+4. Usa el `refresh_token` generado para `GOOGLE_OAUTH_REFRESH_TOKEN`.
 
 ## Cron de alertas
 

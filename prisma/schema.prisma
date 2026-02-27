@@ -3,12 +3,13 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 enum Role {
   STORE
+  CLUSTER
   SUPERADMIN
 }
 
@@ -22,6 +23,18 @@ enum AlertType {
   MISSING_UPLOAD
 }
 
+enum UploadKind {
+  PHOTO
+  VIDEO
+}
+
+enum RequirementKind {
+  NONE
+  PHOTO
+  VIDEO
+  BOTH
+}
+
 model User {
   id           String   @id @default(cuid())
   role         Role
@@ -30,32 +43,55 @@ model User {
   passwordHash String
   mustChangePw Boolean  @default(true)
   storeId      String?
+  clusterId    String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  store Store? @relation(fields: [storeId], references: [id])
+  store   Store?   @relation(fields: [storeId], references: [id])
+  cluster Cluster? @relation(fields: [clusterId], references: [id])
 
   @@index([role])
   @@index([storeId])
+  @@index([clusterId])
+}
+
+model Cluster {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users       User[]
+  stores      Store[]
+  uploadRules UploadRule[]
+
+  @@index([isActive])
 }
 
 model Store {
   id            String   @id @default(cuid())
   name          String
   storeCode     String   @unique
+  clusterId     String?
   isActive      Boolean  @default(true)
   deadlineTime  String?
   driveFolderId String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  users         User[]
+  cluster      Cluster?       @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  users        User[]
   slotTemplates SlotTemplate[]
-  uploadDays    UploadDay[]
-  alerts        Alert[]
-  messages      Message[]
-  auditLogs     AuditLog[]
+  uploadDays   UploadDay[]
+  uploadRules  UploadRule[]
+  alerts       Alert[]
+  messages     Message[]
+  auditLogs    AuditLog[]
+  mediaThreads MediaThread[]
 
+  @@index([clusterId])
   @@index([isActive])
 }
 
@@ -75,49 +111,149 @@ model SlotTemplate {
   @@unique([name, storeId])
 }
 
-model UploadDay {
-  id           String       @id @default(cuid())
-  storeId      String
-  date         DateTime
-  status       UploadStatus @default(PENDING)
-  driveFolderId String?
-  completedAt  DateTime?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+model UploadRule {
+  id          String          @id @default(cuid())
+  weekday     Int
+  requirement RequirementKind
+  storeId     String?
+  clusterId   String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
 
-  store Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  files UploadFile[]
+  store   Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  cluster Cluster? @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@index([weekday])
+  @@index([storeId, weekday])
+  @@index([clusterId, weekday])
+  @@unique([storeId, weekday])
+  @@unique([clusterId, weekday])
+}
+
+model UploadDay {
+  id              String          @id @default(cuid())
+  storeId         String
+  date            DateTime
+  requirementKind RequirementKind @default(NONE)
+  status          UploadStatus    @default(PENDING)
+  isSent          Boolean         @default(false)
+  driveFolderId   String?
+  driveTrace      Json?
+  completedAt     DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  store        Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  files        UploadFile[]
+  mediaThreads MediaThread[]
 
   @@unique([storeId, date])
   @@index([date, status])
+  @@index([storeId, isSent])
 }
 
 model UploadFile {
-  id               String   @id @default(cuid())
+  id               String     @id @default(cuid())
   uploadDayId      String
   slotName         String
-  sequence         Int      @default(1)
+  sequence         Int        @default(1)
+  kind             UploadKind @default(PHOTO)
   originalFilename String
   finalFilename    String
   driveFileId      String
   driveWebViewLink String?
   mimeType         String
   bytes            Int
-  createdAt        DateTime @default(now())
+  versionGroupId   String
+  versionNumber    Int        @default(1)
+  supersedesFileId String?
+  isCurrentVersion Boolean    @default(true)
+  validatedAt      DateTime?
+  validatedByUserId String?
+  validatedByRole  Role?
+  createdByUserId  String?
+  createdByRole    Role?
+  createdAt        DateTime   @default(now())
 
-  uploadDay UploadDay @relation(fields: [uploadDayId], references: [id], onDelete: Cascade)
+  uploadDay      UploadDay            @relation(fields: [uploadDayId], references: [id], onDelete: Cascade)
+  supersedesFile UploadFile?          @relation("UploadFileVersions", fields: [supersedesFileId], references: [id], onDelete: SetNull)
+  newerVersions  UploadFile[]         @relation("UploadFileVersions")
+  threadMessages MediaThreadMessage[]
+  rootThreads    MediaThread[]        @relation("ThreadRootFile")
+  threadVersions MediaThread[]        @relation("ThreadVersionFile")
 
   @@index([uploadDayId, slotName])
+  @@index([uploadDayId, kind])
+  @@index([versionGroupId, versionNumber])
+  @@index([isCurrentVersion, validatedAt])
+}
+
+model MediaThread {
+  id             String    @id @default(cuid())
+  storeId        String
+  uploadDayId    String?
+  rootFileId     String
+  currentFileId  String?
+  versionGroupId String
+  zoneX          Float?
+  zoneY          Float?
+  zoneW          Float?
+  zoneH          Float?
+  createdByUserId String
+  createdByRole  Role
+  resolvedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  store       Store               @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  uploadDay   UploadDay?          @relation(fields: [uploadDayId], references: [id], onDelete: SetNull)
+  rootFile    UploadFile          @relation("ThreadRootFile", fields: [rootFileId], references: [id], onDelete: Cascade)
+  currentFile UploadFile?         @relation("ThreadVersionFile", fields: [currentFileId], references: [id], onDelete: SetNull)
+  messages    MediaThreadMessage[]
+  reads       MediaThreadRead[]
+
+  @@index([storeId, updatedAt])
+  @@index([uploadDayId, updatedAt])
+  @@index([versionGroupId, updatedAt])
+  @@index([resolvedAt])
+}
+
+model MediaThreadMessage {
+  id           String   @id @default(cuid())
+  threadId     String
+  fileId       String?
+  authorUserId String
+  authorRole   Role
+  text         String
+  createdAt    DateTime @default(now())
+
+  thread MediaThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  file   UploadFile? @relation(fields: [fileId], references: [id], onDelete: SetNull)
+
+  @@index([threadId, createdAt])
+  @@index([authorUserId, createdAt])
+}
+
+model MediaThreadRead {
+  id         String   @id @default(cuid())
+  threadId   String
+  userId     String
+  lastReadAt DateTime @default(now())
+
+  thread MediaThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@unique([threadId, userId])
+  @@index([userId, lastReadAt])
 }
 
 model Alert {
-  id         String    @id @default(cuid())
-  storeId    String
-  date       DateTime
-  type       AlertType
-  triggeredAt DateTime @default(now())
-  resolvedAt DateTime?
-  createdAt  DateTime  @default(now())
+  id          String    @id @default(cuid())
+  storeId     String
+  date        DateTime
+  type        AlertType
+  triggeredAt DateTime  @default(now())
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
 
   store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
@@ -159,6 +295,14 @@ model AuditLog {
 model AppConfig {
   id                Int      @id @default(1)
   driveRootFolderId String?
+  smtpEnabled       Boolean  @default(false)
+  smtpHost          String?
+  smtpPort          Int?
+  smtpSecure        Boolean  @default(false)
+  smtpUser          String?
+  smtpPass          String?
+  smtpFrom          String?
+  smtpReplyTo       String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }

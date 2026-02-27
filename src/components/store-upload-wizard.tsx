@@ -1,25 +1,31 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { toUserError, uploadVideoResumable } from "@/lib/client-video-upload";
 
-type SlotItem = {
-  name: string;
-  required: boolean;
-  allowMultiple: boolean;
-  order: number;
-  done: boolean;
-  count: number;
-  preview: string | null;
+type UploadState = "pending" | "uploading" | "done" | "error";
+type Kind = "PHOTO" | "VIDEO";
+
+type QueueItem = {
+  id: string;
+  file: File;
+  kind: Kind;
+  previewUrl: string | null;
+  state: UploadState;
+  error: string | null;
+  hint: string | null;
 };
 
 type DayView = {
   date: string;
   status: "PENDING" | "PARTIAL" | "COMPLETE";
-  slots: SlotItem[];
+  isSent: boolean;
+  requirementKind: "NONE" | "PHOTO" | "VIDEO" | "BOTH";
+  missingKinds: Kind[];
+  photoCount: number;
+  videoCount: number;
   driveFolderId: string | null;
 };
-
-type UploadState = "idle" | "uploading" | "success" | "error";
 
 function dateOffset(daysBack: number) {
   const date = new Date();
@@ -27,44 +33,72 @@ function dateOffset(daysBack: number) {
   return date.toISOString().slice(0, 10);
 }
 
-async function readJsonSafe(response: Response) {
+function kindLabel(kind: DayView["requirementKind"]) {
+  if (kind === "PHOTO") return "Foto";
+  if (kind === "VIDEO") return "Video";
+  if (kind === "BOTH") return "Foto + Video";
+  return "Sin requerimiento";
+}
+
+async function parseJson(response: Response) {
   const raw = await response.text();
   if (!raw) {
     return null;
   }
   try {
-    return JSON.parse(raw) as { error?: string } & Record<string, unknown>;
+    return JSON.parse(raw) as Record<string, unknown>;
   } catch {
     return null;
   }
 }
 
+function requirementMessage(dayView: DayView, queue: QueueItem[]) {
+  const pending = queue.filter((item) => item.state !== "error");
+  const pendingPhotos = pending.filter((item) => item.kind === "PHOTO").length;
+  const pendingVideos = pending.filter((item) => item.kind === "VIDEO").length;
+
+  const effectivePhotos = dayView.photoCount + pendingPhotos;
+  const effectiveVideos = dayView.videoCount + pendingVideos;
+
+  if (dayView.requirementKind === "PHOTO" && effectivePhotos < 1) {
+    return "Hoy se requiere al menos 1 foto para completar el envío.";
+  }
+  if (dayView.requirementKind === "VIDEO" && effectiveVideos < 1) {
+    return "Hoy se requiere al menos 1 vídeo para completar el envío.";
+  }
+  if (dayView.requirementKind === "BOTH") {
+    if (effectivePhotos < 1 && effectiveVideos < 1) {
+      return "Hoy se requiere al menos 1 foto y 1 vídeo.";
+    }
+    if (effectivePhotos < 1) {
+      return "Falta al menos 1 foto para completar hoy.";
+    }
+    if (effectiveVideos < 1) {
+      return "Falta al menos 1 vídeo para completar hoy.";
+    }
+  }
+  return null;
+}
+
 export function StoreUploadWizard() {
   const [dateKey, setDateKey] = useState(() => new Date().toISOString().slice(0, 10));
   const [dayView, setDayView] = useState<DayView | null>(null);
+  const [queue, setQueue] = useState<QueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fileMap, setFileMap] = useState<Record<string, File | null>>({});
-  const [uploadMap, setUploadMap] = useState<Record<string, UploadState>>({});
 
   const loadDay = async (date: string) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/store/today?date=${date}`);
-      const json = await readJsonSafe(response);
+      const response = await fetch(`/api/store/today?date=${date}`, { cache: "no-store" });
+      const json = await parseJson(response);
       if (!response.ok) {
         setError((json as { error?: string } | null)?.error || "No se pudo cargar el día");
         return;
       }
-      if (!json) {
-        setError("Respuesta inválida del servidor");
-        return;
-      }
       setDayView(json as unknown as DayView);
-      setUploadMap({});
-      setFileMap({});
     } catch {
       setError("Error de conexión");
     } finally {
@@ -76,100 +110,191 @@ export function StoreUploadWizard() {
     void loadDay(dateKey);
   }, [dateKey]);
 
-  const previewUrls = useMemo(() => {
-    const values: Record<string, string> = {};
-    for (const [slot, file] of Object.entries(fileMap)) {
-      if (!file) {
-        continue;
-      }
-      values[slot] = URL.createObjectURL(file);
-    }
-    return values;
-  }, [fileMap]);
-
   useEffect(() => {
     return () => {
-      Object.values(previewUrls).forEach((url) => URL.revokeObjectURL(url));
+      for (const item of queue) {
+        if (item.previewUrl) {
+          URL.revokeObjectURL(item.previewUrl);
+        }
+      }
     };
-  }, [previewUrls]);
+  }, [queue]);
 
-  const completedSlots = useMemo(() => {
-    if (!dayView) {
-      return 0;
+  const pendingItems = useMemo(() => queue.filter((item) => item.state !== "done"), [queue]);
+  const missingRequirement = useMemo(() => (dayView ? requirementMessage(dayView, queue) : null), [dayView, queue]);
+
+  const addToQueue = (files: FileList | null, kind: Kind) => {
+    if (!files || files.length === 0) {
+      return;
     }
-    return dayView.slots.filter((slot) => slot.done || fileMap[slot.name]).length;
-  }, [dayView, fileMap]);
-
-  const requiredSlots = useMemo(() => dayView?.slots.filter((slot) => slot.required).length ?? 0, [dayView]);
-
-  const pendingUploads = useMemo(() => {
-    if (!dayView) {
-      return [];
+    const additions: QueueItem[] = [];
+    for (const file of Array.from(files)) {
+      additions.push({
+        id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        file,
+        kind,
+        previewUrl: kind === "PHOTO" ? URL.createObjectURL(file) : null,
+        state: "pending",
+        error: null,
+        hint: null
+      });
     }
-    return dayView.slots.filter((slot) => fileMap[slot.name]);
-  }, [dayView, fileMap]);
-
-  const onPickFile = (slotName: string, file: File | null) => {
-    setFileMap((prev) => ({
-      ...prev,
-      [slotName]: file
-    }));
-    setUploadMap((prev) => ({
-      ...prev,
-      [slotName]: "idle"
-    }));
+    setQueue((prev) => [...prev, ...additions]);
   };
 
-  const uploadSlot = async (slotName: string, file: File) => {
-    const formData = new FormData();
-    formData.append("date", dateKey);
-    formData.append("slotName", slotName);
-    formData.append("file", file);
-
-    setUploadMap((prev) => ({ ...prev, [slotName]: "uploading" }));
-
-    const response = await fetch("/api/store/upload", {
-      method: "POST",
-      body: formData
+  const removeFromQueue = (id: string) => {
+    setQueue((prev) => {
+      const target = prev.find((item) => item.id === id);
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      return prev.filter((item) => item.id !== id);
     });
-    const json = await readJsonSafe(response);
-    if (!response.ok) {
-      setUploadMap((prev) => ({ ...prev, [slotName]: "error" }));
-      throw new Error((json as { error?: string } | null)?.error || `No se pudo subir la foto (${response.status})`);
-    }
-    setUploadMap((prev) => ({ ...prev, [slotName]: "success" }));
   };
 
-  const onSend = async () => {
-    if (!dayView || pendingUploads.length === 0) {
+  const setItemState = (
+    id: string,
+    state: UploadState,
+    errorMsg: string | null = null,
+    hint: string | null = null
+  ) => {
+    setQueue((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              state,
+              error: errorMsg,
+              hint
+            }
+          : item
+      )
+    );
+  };
+
+  const uploadClassic = async (item: QueueItem) => {
+    setItemState(item.id, "uploading");
+    try {
+      const formData = new FormData();
+      formData.append("date", dateKey);
+      formData.append("kind", item.kind);
+      formData.append("slotName", item.kind === "VIDEO" ? "VIDEO" : "FOTO");
+      formData.append("file", item.file);
+
+      const response = await fetch("/api/store/upload", {
+        method: "POST",
+        body: formData
+      });
+      const json = await parseJson(response);
+      if (!response.ok) {
+        const msg = (json as { error?: string } | null)?.error || `Fallo de subida (${response.status})`;
+        setItemState(item.id, "error", msg);
+        throw new Error(msg);
+      }
+      setItemState(item.id, "done", null, "Subida completada");
+    } catch (error) {
+      const msg = toUserError(error, "Error de red al subir archivo");
+      setItemState(item.id, "error", msg);
+      throw error;
+    }
+  };
+
+  const uploadLargeVideo = async (item: QueueItem) => {
+    setItemState(item.id, "uploading");
+    try {
+      const result = await uploadVideoResumable(item.file, {
+        date: dateKey,
+        slotName: "VIDEO",
+        onProgress: (progress) => {
+          if (progress.phase === "optimizing") {
+            setItemState(item.id, "uploading", null, "Optimizando vídeo...");
+            return;
+          }
+          if (progress.phase === "uploading") {
+            const pct = progress.totalBytes > 0 ? Math.max(1, Math.round((progress.uploadedBytes / progress.totalBytes) * 100)) : 0;
+            setItemState(item.id, "uploading", null, `Subiendo vídeo... ${pct}%`);
+            return;
+          }
+          setItemState(item.id, "uploading", null, "Finalizando vídeo...");
+        }
+      });
+
+      setItemState(
+        item.id,
+        "done",
+        null,
+        result.optimized
+          ? `Vídeo optimizado y enviado (${Math.round(result.usedFile.size / 1024)} KB)`
+          : "Vídeo enviado"
+      );
+    } catch (error) {
+      const msg = toUserError(error, "Error de red en subida de vídeo");
+      setItemState(item.id, "error", msg);
+      throw error;
+    }
+  };
+
+  const uploadItem = async (item: QueueItem) => {
+    if (item.kind === "VIDEO") {
+      return uploadLargeVideo(item);
+    }
+    return uploadClassic(item);
+  };
+
+  const onSendAll = async () => {
+    if (pendingItems.length === 0) {
+      return;
+    }
+    if (missingRequirement) {
+      setError(missingRequirement);
       return;
     }
     setSending(true);
     setError(null);
+
     try {
-      for (const slot of pendingUploads) {
-        const file = fileMap[slot.name];
-        if (!file) {
-          continue;
+      for (const item of pendingItems) {
+        try {
+          await uploadItem(item);
+        } catch {
+          // continues with the rest; each item stores its own error
         }
-        await uploadSlot(slot.name, file);
       }
       await loadDay(dateKey);
-    } catch (err) {
-      setError((err as Error).message);
+      const refreshed = await fetch(`/api/store/today?date=${dateKey}`, { cache: "no-store" });
+      const refreshedJson = (await parseJson(refreshed)) as DayView | null;
+      if (refreshed.ok && refreshedJson && !refreshedJson.isSent) {
+        const requiredText =
+          refreshedJson.requirementKind === "BOTH"
+            ? "foto y vídeo"
+            : refreshedJson.requirementKind === "PHOTO"
+              ? "foto"
+              : refreshedJson.requirementKind === "VIDEO"
+                ? "vídeo"
+                : "contenido";
+        setError(`Subida finalizada, pero hoy sigue incompleto: falta ${requiredText}.`);
+      }
     } finally {
       setSending(false);
     }
   };
 
   if (loading || !dayView) {
-    return <div className="panel p-4 text-sm text-muted">Cargando wizard...</div>;
+    return <div className="panel p-4 text-sm text-muted">Cargando subida...</div>;
   }
 
   return (
     <section className="space-y-4">
       <article className="panel p-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Paso 0 · Fecha</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Hoy toca</p>
+        <p className="mt-1 text-lg font-semibold">{kindLabel(dayView.requirementKind)}</p>
+        <p className="text-sm text-muted">
+          Estado: <strong>{dayView.isSent ? "Enviado" : "No enviado"}</strong> · Fotos {dayView.photoCount} · Videos {dayView.videoCount}
+        </p>
+      </article>
+
+      <article className="panel p-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Fecha</p>
         <div className="mt-2 flex items-center gap-2">
           <input
             type="date"
@@ -179,109 +304,91 @@ export function StoreUploadWizard() {
             min={dateOffset(7)}
             onChange={(event) => setDateKey(event.target.value)}
           />
-          <span className="text-xs text-muted">Estado: {dayView.status}</span>
+          <span className="text-xs text-muted">Ventana de 7 días</span>
+        </div>
+      </article>
+
+      <article className="panel p-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Capturar en lote</p>
+        <p className="text-sm text-muted">Haz todas las capturas primero y luego pulsa “Enviar todo”.</p>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <label className="btn-primary h-10 cursor-pointer px-3 text-xs">
+            Añadir foto
+            <input hidden type="file" accept="image/*" capture="environment" onChange={(event) => addToQueue(event.target.files, "PHOTO")} />
+          </label>
+          <label className="btn-ghost h-10 cursor-pointer px-3 text-xs">
+            Añadir vídeo
+            <input hidden type="file" accept="video/*" capture="environment" onChange={(event) => addToQueue(event.target.files, "VIDEO")} />
+          </label>
         </div>
       </article>
 
       <article className="panel p-4">
         <div className="mb-2 flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Paso 1 · Captura</p>
-          <p className="text-xs text-muted">
-            {completedSlots}/{requiredSlots} requeridas
-          </p>
+          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Pendientes</p>
+          <p className="text-xs text-muted">{pendingItems.length} por enviar</p>
         </div>
 
-        <ul className="space-y-3">
-          {dayView.slots.map((slot) => {
-            const localPreview = previewUrls[slot.name] || null;
-            const done = slot.done || Boolean(fileMap[slot.name]);
-            const uploadState = uploadMap[slot.name] || "idle";
+        {queue.length === 0 ? <p className="text-sm text-muted">No hay elementos en cola.</p> : null}
+        {missingRequirement ? <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-warning">{missingRequirement}</p> : null}
 
-            return (
-              <li key={slot.name} className="rounded-xl border border-line p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold">{slot.name}</p>
-                    <p className="text-xs text-muted">
-                      {done ? "OK" : "Pendiente"} {slot.required ? "· Requerida" : "· Opcional"}
-                    </p>
-                  </div>
+        <ul className="space-y-2">
+          {queue.map((item) => (
+            <li key={item.id} className="rounded-xl border border-line px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="truncate text-sm font-semibold">{item.file.name}</p>
+                  <p className="text-xs text-muted">
+                    {item.kind === "PHOTO" ? "Foto" : "Vídeo"} · {Math.round(item.file.size / 1024)} KB
+                  </p>
+                  {item.hint ? <p className="text-xs text-muted">{item.hint}</p> : null}
+                  {item.error ? <p className="text-xs font-semibold text-danger">{item.error}</p> : null}
+                </div>
+                <div className="flex items-center gap-2">
                   <span
                     className={`chip ${
-                      uploadState === "error"
-                        ? "bg-red-50 text-danger"
-                        : uploadState === "success"
-                          ? "bg-emerald-50 text-success"
-                          : "bg-slate-100 text-muted"
+                      item.state === "done"
+                        ? "bg-emerald-50 text-success"
+                        : item.state === "error"
+                          ? "bg-red-50 text-danger"
+                          : item.state === "uploading"
+                            ? "bg-sky-50 text-primary"
+                            : "bg-slate-100 text-muted"
                     }`}
                   >
-                    {uploadState === "uploading"
-                      ? "Subiendo..."
-                      : uploadState === "success"
-                        ? "Subido"
-                        : uploadState === "error"
-                          ? "Error"
-                          : "Listo"}
+                    {item.state === "done"
+                      ? "Enviado"
+                      : item.state === "error"
+                        ? "Error"
+                        : item.state === "uploading"
+                          ? "Subiendo"
+                          : "Pendiente"}
                   </span>
+                  {item.state !== "uploading" ? (
+                    <button onClick={() => removeFromQueue(item.id)} className="btn-ghost h-8 px-2 text-xs">
+                      Quitar
+                    </button>
+                  ) : null}
                 </div>
-
-                <div className="mt-2 flex items-center gap-2">
-                  <label className="btn-primary h-10 cursor-pointer px-3 text-xs">
-                    Hacer foto
-                    <input
-                      hidden
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={(event) => onPickFile(slot.name, event.target.files?.[0] || null)}
-                    />
-                  </label>
-                  <label className="btn-ghost h-10 cursor-pointer px-3 text-xs">
-                    Repetir
-                    <input
-                      hidden
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={(event) => onPickFile(slot.name, event.target.files?.[0] || null)}
-                    />
-                  </label>
+              </div>
+              {item.previewUrl ? (
+                <div className="mt-2">
+                  <img src={item.previewUrl} alt={item.file.name} className="h-24 w-32 rounded-lg border border-line object-cover" />
                 </div>
-
-                {localPreview ? (
-                  <div className="mt-3">
-                    <img
-                      src={localPreview}
-                      alt={`Preview ${slot.name}`}
-                      className="h-20 w-28 rounded-lg border border-line object-cover"
-                    />
-                  </div>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-      </article>
-
-      <article className="panel p-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Paso 2 · Revisión</p>
-        <ul className="mt-2 space-y-2 text-sm">
-          {dayView.slots.map((slot) => (
-            <li key={slot.name} className="flex items-center justify-between rounded-lg border border-line px-3 py-2">
-              <span>{slot.name}</span>
-              <span className={fileMap[slot.name] || slot.done ? "text-success" : "text-warning"}>
-                {fileMap[slot.name] ? "Nueva foto lista" : slot.done ? "Ya subida" : "Falta"}
-              </span>
+              ) : null}
             </li>
           ))}
         </ul>
-        {error ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-danger">{error}</p> : null}
+
+        {error ? <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p> : null}
+
         <button
-          onClick={onSend}
-          disabled={sending || pendingUploads.length === 0}
+          onClick={onSendAll}
+          disabled={sending || pendingItems.length === 0 || Boolean(missingRequirement)}
           className="btn-primary mt-3 h-11 w-full disabled:opacity-60"
         >
-          {sending ? "Subiendo..." : pendingUploads.length === 0 ? "Sin cambios para enviar" : "Enviar"}
+          {sending ? "Subiendo..." : pendingItems.length === 0 ? "Sin elementos para enviar" : "Enviar todo"}
         </button>
       </article>
     </section>

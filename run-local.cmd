@@ -6,9 +6,6 @@ set "NODE_VERSION=v24.14.0"
 set "NODE_FOLDER=node-%NODE_VERSION%-win-x64"
 set "NODE_HOME=%CD%\.tools\node\%NODE_FOLDER%"
 set "NODE_ZIP=%CD%\.tools\node\node.zip"
-set "ROOT_SHORT=%~sdp0"
-set "ROOT_URI=%ROOT_SHORT:\=/%"
-if "%ROOT_URI:~-1%"=="/" set "ROOT_URI=%ROOT_URI:~0,-1%"
 
 echo [1/7] Preparando Node portable...
 if not exist "%NODE_HOME%\node.exe" (
@@ -31,7 +28,6 @@ if not exist "%NODE_HOME%\node.exe" (
 )
 
 set "PATH=%NODE_HOME%;%PATH%"
-set "DATABASE_URL=file:%ROOT_URI%/dev.db"
 
 echo [2/7] Verificando Node y npm...
 node -v >nul 2>&1
@@ -56,7 +52,6 @@ if not exist ".env" (
     exit /b 1
   )
 )
-if not exist "%ROOT_SHORT%dev.db" type nul > "%ROOT_SHORT%dev.db"
 
 echo [4/7] Instalando dependencias...
 call npm install

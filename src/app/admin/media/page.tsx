@@ -1,9 +1,19 @@
 import { AppHeader } from "@/components/app-header";
 import { AdminMediaLibrary } from "@/components/admin-media-library";
-import { requireAdminPage } from "@/lib/page-auth";
+import { requireManagerPage } from "@/lib/page-auth";
 
 export default async function AdminMediaPage() {
-  await requireAdminPage();
+  const manager = await requireManagerPage();
+  const links = [
+    { href: "/admin", label: "Dashboard" },
+    ...(manager.role === "SUPERADMIN" ? [{ href: "/admin/accounts", label: "Cuentas" }] : []),
+    { href: "/admin/stores", label: "Tiendas" },
+    { href: "/admin/media", label: "Biblioteca" },
+    { href: "/admin/messages", label: "Mensajes" }
+  ];
+  if (manager.role === "SUPERADMIN") {
+    links.push({ href: "/admin/settings", label: "Ajustes" });
+  }
 
   return (
     <main className="app-shell">
@@ -11,13 +21,7 @@ export default async function AdminMediaPage() {
         title="Biblioteca de contenido"
         subtitle="Previsualiza, abre en galería y descarga por tienda/día"
         currentPath="/admin/media"
-        links={[
-          { href: "/admin", label: "Dashboard" },
-          { href: "/admin/stores", label: "Tiendas" },
-          { href: "/admin/media", label: "Biblioteca" },
-          { href: "/admin/messages", label: "Mensajes" },
-          { href: "/admin/settings", label: "Ajustes" }
-        ]}
+        links={links}
       />
       <AdminMediaLibrary />
     </main>

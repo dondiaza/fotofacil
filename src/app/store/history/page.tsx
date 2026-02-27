@@ -1,5 +1,6 @@
 import { subDays } from "date-fns";
 import { AppHeader } from "@/components/app-header";
+import { StoreMediaReview } from "@/components/store-media-review";
 import { StatusChip } from "@/components/status-chip";
 import { formatDateKey } from "@/lib/date";
 import { driveFolderLink } from "@/lib/drive-links";
@@ -29,7 +30,7 @@ export default async function StoreHistoryPage() {
   const unread = await prisma.message.count({
     where: {
       storeId: store.id,
-      fromRole: "SUPERADMIN",
+      NOT: { fromRole: "STORE" },
       readAt: null
     }
   });
@@ -76,6 +77,8 @@ export default async function StoreHistoryPage() {
           ))}
         </ul>
       </section>
+
+      <StoreMediaReview />
     </main>
   );
 }

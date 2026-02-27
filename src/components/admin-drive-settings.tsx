@@ -7,6 +7,7 @@ type SettingsPayload = {
   item: {
     driveRootFolderId: string | null;
     effectiveDriveRootFolderId: string | null;
+    authMode: "oauth" | "service_account" | "none";
     rootMeta: {
       id?: string | null;
       name?: string | null;
@@ -18,6 +19,7 @@ type SettingsPayload = {
 export function AdminDriveSettings() {
   const [folderId, setFolderId] = useState("");
   const [effectiveFolderId, setEffectiveFolderId] = useState<string | null>(null);
+  const [authMode, setAuthMode] = useState<SettingsPayload["item"]["authMode"]>("none");
   const [folderMeta, setFolderMeta] = useState<SettingsPayload["item"]["rootMeta"]>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -36,6 +38,7 @@ export function AdminDriveSettings() {
       }
       setFolderId(json.item.driveRootFolderId || "");
       setEffectiveFolderId(json.item.effectiveDriveRootFolderId || null);
+      setAuthMode(json.item.authMode || "none");
       setFolderMeta(json.item.rootMeta);
     } catch {
       setError("Error de conexión");
@@ -79,6 +82,12 @@ export function AdminDriveSettings() {
     <section className="grid gap-4 lg:grid-cols-[460px_1fr]">
       <form onSubmit={onSave} className="panel space-y-3 p-4">
         <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Vincular estructura Drive</p>
+        <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-muted">
+          Modo autenticación:{" "}
+          <strong className="text-slate-700">
+            {authMode === "oauth" ? "OAuth backend" : authMode === "service_account" ? "Service Account" : "Sin configurar"}
+          </strong>
+        </p>
         <label className="block space-y-1">
           <span className="text-xs text-muted">ID carpeta raíz</span>
           <input
@@ -100,9 +109,15 @@ export function AdminDriveSettings() {
         <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Estructura prevista diaria</p>
         <div className="mt-2 rounded-xl border border-line bg-white p-3 text-sm">
           <p className="font-semibold">{folderMeta?.name || "RAIZ_PROYECTO_DRIVE"}</p>
-          <p className="pl-4 text-muted">└─ TIENDA_043</p>
-          <p className="pl-8 text-muted">└─ 2026-02-26</p>
-          <p className="pl-12 text-muted">└─ 043_2026-02-26_ESCAPARATE_1_01.jpg</p>
+          <p className="pl-4 text-muted">└─ Cluster Norte</p>
+          <p className="pl-8 text-muted">└─ 043 Gran Via</p>
+          <p className="pl-12 text-muted">└─ 2026</p>
+          <p className="pl-16 text-muted">└─ 02 FEBRERO</p>
+          <p className="pl-20 text-muted">└─ SEMANA 09</p>
+          <p className="pl-24 text-muted">└─ JUEVES 26</p>
+          <p className="pl-28 text-muted">├─ Foto</p>
+          <p className="pl-32 text-muted">└─ 043_2026-02-26_ESCAPARATE_1_01.jpg</p>
+          <p className="pl-28 text-muted">└─ Video (bajo demanda)</p>
         </div>
 
         <div className="mt-3 text-sm">

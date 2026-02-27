@@ -1,13 +1,14 @@
 import { z } from "zod";
-import { badRequest, unauthorized } from "@/lib/http";
+import { badRequest, forbidden, unauthorized } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/request-auth";
+import { canManagerAccessStore, requireManager } from "@/lib/request-auth";
 import { writeAuditLog } from "@/lib/audit";
 
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
   isActive: z.boolean().optional(),
   deadlineTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
+  clusterId: z.string().nullable().optional(),
   slots: z
     .array(
       z.object({
@@ -25,15 +26,26 @@ type Context = {
 };
 
 export async function GET(_: Request, context: Context) {
-  const admin = await requireAdmin();
-  if (!admin) {
+  const manager = await requireManager();
+  if (!manager) {
     return unauthorized();
   }
 
   const { id } = await context.params;
+  if (!(await canManagerAccessStore(manager, id))) {
+    return forbidden();
+  }
+
   const store = await prisma.store.findUnique({
     where: { id },
     include: {
+      cluster: {
+        select: {
+          id: true,
+          name: true,
+          code: true
+        }
+      },
       users: {
         where: { role: "STORE" },
         select: {
@@ -55,9 +67,15 @@ export async function GET(_: Request, context: Context) {
             select: {
               id: true,
               slotName: true,
+              kind: true,
               finalFilename: true,
               driveFileId: true,
               driveWebViewLink: true,
+              isCurrentVersion: true,
+              versionGroupId: true,
+              versionNumber: true,
+              validatedAt: true,
+              validatedByRole: true,
               createdAt: true
             }
           }
@@ -76,12 +94,16 @@ export async function GET(_: Request, context: Context) {
 }
 
 export async function PATCH(request: Request, context: Context) {
-  const admin = await requireAdmin();
-  if (!admin) {
+  const manager = await requireManager();
+  if (!manager) {
     return unauthorized();
   }
 
   const { id } = await context.params;
+  if (!(await canManagerAccessStore(manager, id))) {
+    return forbidden();
+  }
+
   const body = await request.json().catch(() => null);
   const parsed = updateSchema.safeParse(body);
   if (!parsed.success) {
@@ -100,15 +122,42 @@ export async function PATCH(request: Request, context: Context) {
     return badRequest("Store not found");
   }
 
+  if (!manager.isSuperAdmin && data.clusterId !== undefined && data.clusterId !== store.clusterId) {
+    return forbidden("Cluster no puede reasignar tiendas a otro cluster");
+  }
+
+  if (manager.isSuperAdmin && data.clusterId !== undefined && data.clusterId !== null) {
+    const clusterExists = await prisma.cluster.findUnique({
+      where: { id: data.clusterId },
+      select: { id: true }
+    });
+    if (!clusterExists) {
+      return badRequest("clusterId no válido");
+    }
+  }
+
   await prisma.$transaction(async (tx) => {
     await tx.store.update({
       where: { id },
       data: {
         ...(data.name ? { name: data.name.trim() } : {}),
         ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
-        ...(data.deadlineTime !== undefined ? { deadlineTime: data.deadlineTime } : {})
+        ...(data.deadlineTime !== undefined ? { deadlineTime: data.deadlineTime } : {}),
+        ...(manager.isSuperAdmin && data.clusterId !== undefined ? { clusterId: data.clusterId } : {})
       }
     });
+
+    if (manager.isSuperAdmin && data.clusterId !== undefined) {
+      await tx.user.updateMany({
+        where: {
+          storeId: id,
+          role: "STORE"
+        },
+        data: {
+          clusterId: data.clusterId
+        }
+      });
+    }
 
     if (data.slots) {
       await tx.slotTemplate.deleteMany({ where: { storeId: id } });
@@ -128,7 +177,7 @@ export async function PATCH(request: Request, context: Context) {
 
   await writeAuditLog({
     action: "ADMIN_STORE_UPDATED",
-    userId: admin.uid,
+    userId: manager.session.uid,
     storeId: id,
     payload: data
   });
@@ -136,6 +185,13 @@ export async function PATCH(request: Request, context: Context) {
   const updated = await prisma.store.findUnique({
     where: { id },
     include: {
+      cluster: {
+        select: {
+          id: true,
+          name: true,
+          code: true
+        }
+      },
       slotTemplates: {
         where: { storeId: id },
         orderBy: { order: "asc" }
@@ -152,9 +208,15 @@ export async function PATCH(request: Request, context: Context) {
             select: {
               id: true,
               slotName: true,
+              kind: true,
               finalFilename: true,
               driveFileId: true,
               driveWebViewLink: true,
+              isCurrentVersion: true,
+              versionGroupId: true,
+              versionNumber: true,
+              validatedAt: true,
+              validatedByRole: true,
               createdAt: true
             }
           }

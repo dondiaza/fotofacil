@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { ChatPanel } from "@/components/chat-panel";
 
+type Role = "STORE" | "CLUSTER" | "SUPERADMIN";
+
 type StoreListItem = {
   id: string;
   name: string;
@@ -10,7 +12,7 @@ type StoreListItem = {
   unreadMessages: number;
 };
 
-export function AdminInbox() {
+export function AdminInbox({ currentRole }: { currentRole: Role }) {
   const [stores, setStores] = useState<StoreListItem[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,7 +67,7 @@ export function AdminInbox() {
         </ul>
       </aside>
 
-      <div>{selected ? <ChatPanel storeId={selected} currentRole="SUPERADMIN" title="Chat seleccionado" /> : null}</div>
+      <div>{selected ? <ChatPanel storeId={selected} currentRole={currentRole} title="Chat seleccionado" /> : null}</div>
     </section>
   );
 }

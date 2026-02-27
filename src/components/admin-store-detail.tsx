@@ -37,7 +37,9 @@ type StoreDetail = {
   uploadDays: DayItem[];
 };
 
-export function AdminStoreDetail({ initial }: { initial: StoreDetail }) {
+type ManagerRole = "CLUSTER" | "SUPERADMIN";
+
+export function AdminStoreDetail({ initial, currentRole }: { initial: StoreDetail; currentRole: ManagerRole }) {
   const [item, setItem] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -165,7 +167,7 @@ export function AdminStoreDetail({ initial }: { initial: StoreDetail }) {
           </ul>
         </article>
 
-        <ChatPanel storeId={item.id} currentRole="SUPERADMIN" title="Chat con tienda" />
+        <ChatPanel storeId={item.id} currentRole={currentRole} title="Chat con tienda" />
       </div>
     </section>
   );

@@ -27,7 +27,7 @@ export function LoginForm() {
         return;
       }
 
-      router.push(json.user.role === "SUPERADMIN" ? "/admin" : "/store");
+      router.push(json.user.role === "STORE" ? "/store" : "/admin");
       router.refresh();
     } catch {
       setError("No se pudo conectar con el servidor");

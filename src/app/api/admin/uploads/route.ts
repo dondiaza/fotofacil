@@ -2,11 +2,11 @@ import { UploadStatus } from "@prisma/client";
 import { formatDateKey, parseDateKey, todayDateKey } from "@/lib/date";
 import { badRequest, unauthorized } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/request-auth";
+import { requireManager, storeScopeWhere } from "@/lib/request-auth";
 
 export async function GET(request: Request) {
-  const admin = await requireAdmin();
-  if (!admin) {
+  const manager = await requireManager();
+  if (!manager) {
     return unauthorized();
   }
 
@@ -22,7 +22,8 @@ export async function GET(request: Request) {
 
   const stores = await prisma.store.findMany({
     where: {
-      isActive: true
+      isActive: true,
+      ...storeScopeWhere(manager)
     },
     include: {
       uploadDays: {
@@ -45,6 +46,8 @@ export async function GET(request: Request) {
         storeCode: store.storeCode,
         storeName: store.name,
         status: dayInfo?.status ?? UploadStatus.PENDING,
+        isSent: dayInfo?.isSent ?? false,
+        requirementKind: dayInfo?.requirementKind ?? "NONE",
         driveFolderId: dayInfo?.driveFolderId ?? null,
         fileCount: dayInfo?.files.length ?? 0,
         lastActivityAt: dayInfo?.updatedAt ?? null

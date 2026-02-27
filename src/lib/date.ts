@@ -1,4 +1,4 @@
-import { format, parse, startOfDay } from "date-fns";
+import { format, getISOWeek, parse, startOfDay } from "date-fns";
 
 export function toDayStart(date: Date) {
   return startOfDay(date);
@@ -40,4 +40,46 @@ export function parseDeadlineToMinutes(deadline: string) {
 export function nowMinutes() {
   const now = new Date();
   return now.getHours() * 60 + now.getMinutes();
+}
+
+const MONTHS_ES = [
+  "ENERO",
+  "FEBRERO",
+  "MARZO",
+  "ABRIL",
+  "MAYO",
+  "JUNIO",
+  "JULIO",
+  "AGOSTO",
+  "SEPTIEMBRE",
+  "OCTUBRE",
+  "NOVIEMBRE",
+  "DICIEMBRE"
+];
+
+const WEEKDAYS_ES = ["DOMINGO", "LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO"];
+
+export function weekdayIndex(date: Date) {
+  return date.getDay();
+}
+
+export function driveYearLabel(date: Date) {
+  return format(date, "yyyy");
+}
+
+export function driveMonthLabel(date: Date) {
+  const monthIndex = date.getMonth();
+  const monthNumber = String(monthIndex + 1).padStart(2, "0");
+  return `${monthNumber} ${MONTHS_ES[monthIndex]}`;
+}
+
+export function driveWeekLabel(date: Date) {
+  const week = String(getISOWeek(date)).padStart(2, "0");
+  return `SEMANA ${week}`;
+}
+
+export function driveDayLabel(date: Date) {
+  const dayName = WEEKDAYS_ES[date.getDay()];
+  const dayNumber = format(date, "d");
+  return `${dayName} ${dayNumber}`;
 }

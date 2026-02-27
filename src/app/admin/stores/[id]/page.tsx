@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
 import { AdminStoreDetail } from "@/components/admin-store-detail";
 import { formatDateKey } from "@/lib/date";
-import { requireAdminPage } from "@/lib/page-auth";
+import { requireManagerPage } from "@/lib/page-auth";
 import { prisma } from "@/lib/prisma";
 
 type Props = {
@@ -11,8 +11,18 @@ type Props = {
 };
 
 export default async function AdminStoreDetailPage(props: Props) {
-  await requireAdminPage();
+  const manager = await requireManagerPage();
   const { id } = await props.params;
+  const links = [
+    { href: "/admin", label: "Dashboard" },
+    ...(manager.role === "SUPERADMIN" ? [{ href: "/admin/accounts", label: "Cuentas" }] : []),
+    { href: "/admin/stores", label: "Tiendas" },
+    { href: "/admin/media", label: "Biblioteca" },
+    { href: "/admin/messages", label: "Mensajes" }
+  ];
+  if (manager.role === "SUPERADMIN") {
+    links.push({ href: "/admin/settings", label: "Ajustes" });
+  }
 
   const store = await prisma.store.findUnique({
     where: { id },
@@ -47,6 +57,10 @@ export default async function AdminStoreDetailPage(props: Props) {
     notFound();
   }
 
+  if (manager.role === "CLUSTER" && store.clusterId !== manager.clusterId) {
+    notFound();
+  }
+
   const initial = {
     ...store,
     uploadDays: store.uploadDays.map((day) => ({
@@ -61,15 +75,9 @@ export default async function AdminStoreDetailPage(props: Props) {
         title={`${store.storeCode} · ${store.name}`}
         subtitle={<Link href="/admin/stores" className="text-primary hover:underline">Volver a tiendas</Link>}
         currentPath="/admin/stores"
-        links={[
-          { href: "/admin", label: "Dashboard" },
-          { href: "/admin/stores", label: "Tiendas" },
-          { href: "/admin/media", label: "Biblioteca" },
-          { href: "/admin/messages", label: "Mensajes" },
-          { href: "/admin/settings", label: "Ajustes" }
-        ]}
+        links={links}
       />
-      <AdminStoreDetail initial={initial} />
+      <AdminStoreDetail initial={initial} currentRole={manager.role} />
     </main>
   );
 }

@@ -1,8 +1,38 @@
 import bcrypt from "bcryptjs";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, RequirementKind } from "@prisma/client";
 import { DEFAULT_SLOTS } from "../src/lib/constants";
 
 const prisma = new PrismaClient();
+
+async function upsertGlobalRules() {
+  // 0 = Sunday ... 6 = Saturday
+  const weekdays = [0, 1, 2, 3, 4, 5, 6];
+  for (const weekday of weekdays) {
+    const existing = await prisma.uploadRule.findFirst({
+      where: {
+        weekday,
+        storeId: null,
+        clusterId: null
+      }
+    });
+
+    if (existing) {
+      await prisma.uploadRule.update({
+        where: { id: existing.id },
+        data: {
+          requirement: RequirementKind.PHOTO
+        }
+      });
+    } else {
+      await prisma.uploadRule.create({
+        data: {
+          weekday,
+          requirement: RequirementKind.PHOTO
+        }
+      });
+    }
+  }
+}
 
 async function main() {
   const adminEmail = process.env.DEFAULT_ADMIN_EMAIL || "admin@fotofacil.local";
@@ -15,7 +45,9 @@ async function main() {
       email: adminEmail,
       passwordHash,
       role: "SUPERADMIN",
-      mustChangePw: false
+      mustChangePw: false,
+      storeId: null,
+      clusterId: null
     },
     create: {
       username: "superadmin",
@@ -56,6 +88,8 @@ async function main() {
     }
   }
 
+  await upsertGlobalRules();
+
   await prisma.appConfig.upsert({
     where: { id: 1 },
     update: {
@@ -67,13 +101,48 @@ async function main() {
     }
   });
 
-  // Example store and user for local testing.
+  const cluster = await prisma.cluster.upsert({
+    where: { code: "NORTE" },
+    update: {
+      name: "Cluster Norte",
+      isActive: true
+    },
+    create: {
+      code: "NORTE",
+      name: "Cluster Norte",
+      isActive: true
+    }
+  });
+
+  await prisma.user.upsert({
+    where: { username: "cluster_norte" },
+    update: {
+      role: "CLUSTER",
+      clusterId: cluster.id,
+      storeId: null,
+      passwordHash,
+      mustChangePw: false
+    },
+    create: {
+      username: "cluster_norte",
+      email: "cluster.norte@fotofacil.local",
+      role: "CLUSTER",
+      clusterId: cluster.id,
+      passwordHash,
+      mustChangePw: false
+    }
+  });
+
   const store = await prisma.store.upsert({
     where: { storeCode: "043" },
-    update: {},
+    update: {
+      clusterId: cluster.id,
+      isActive: true
+    },
     create: {
       name: "Tienda Demo 043",
       storeCode: "043",
+      clusterId: cluster.id,
       isActive: true
     }
   });
@@ -83,13 +152,16 @@ async function main() {
     update: {
       role: "STORE",
       storeId: store.id,
-      passwordHash
+      clusterId: cluster.id,
+      passwordHash,
+      mustChangePw: false
     },
     create: {
       username: "tienda043",
       email: "tienda043@fotofacil.local",
       role: "STORE",
       storeId: store.id,
+      clusterId: cluster.id,
       passwordHash,
       mustChangePw: false
     }
@@ -97,6 +169,7 @@ async function main() {
 
   console.log("Seed complete.");
   console.log("Superadmin:", adminEmail, "/ username superadmin");
+  console.log("Cluster demo:", "cluster_norte /", adminPassword);
   console.log("Store demo:", "tienda043 /", adminPassword);
 }
 

@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { badRequest, unauthorized } from "@/lib/http";
+import { badRequest, forbidden, unauthorized } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/request-auth";
+import { canManagerAccessStore, requireManager } from "@/lib/request-auth";
 import { writeAuditLog } from "@/lib/audit";
 
 const bodySchema = z.object({
@@ -13,12 +13,15 @@ type Context = {
 };
 
 export async function POST(request: Request, context: Context) {
-  const admin = await requireAdmin();
-  if (!admin) {
+  const manager = await requireManager();
+  if (!manager) {
     return unauthorized();
   }
 
   const { storeId } = await context.params;
+  if (!(await canManagerAccessStore(manager, storeId))) {
+    return forbidden();
+  }
   const store = await prisma.store.findUnique({ where: { id: storeId } });
   if (!store) {
     return badRequest("Store not found");
@@ -32,21 +35,21 @@ export async function POST(request: Request, context: Context) {
 
   const text =
     parsed.data.text ||
-    "Recordatorio: por favor sube el set diario de fotos en cuanto te sea posible. Gracias.";
+    "Recordatorio: por favor sube el contenido diario requerido en cuanto te sea posible. Gracias.";
 
   const msg = await prisma.message.create({
     data: {
       storeId,
-      fromRole: "SUPERADMIN",
+      fromRole: manager.session.role,
       text
     }
   });
 
   await writeAuditLog({
-    action: "ADMIN_REMINDER_SENT",
-    userId: admin.uid,
+    action: "MANAGER_REMINDER_SENT",
+    userId: manager.session.uid,
     storeId,
-    payload: { messageId: msg.id }
+    payload: { messageId: msg.id, fromRole: manager.session.role }
   });
 
   return Response.json({ ok: true, message: msg });

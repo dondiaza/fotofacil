@@ -5,8 +5,9 @@ const SESSION_COOKIE = "ff_session";
 
 type Session = {
   uid: string;
-  role: "STORE" | "SUPERADMIN";
+  role: "STORE" | "CLUSTER" | "SUPERADMIN";
   storeId: string | null;
+  clusterId: string | null;
   username: string;
 };
 
@@ -43,7 +44,7 @@ export async function middleware(request: NextRequest) {
     if (!session) {
       return NextResponse.next();
     }
-    const target = session.role === "SUPERADMIN" ? "/admin" : "/store";
+    const target = session.role === "STORE" ? "/store" : "/admin";
     return NextResponse.redirect(new URL(target, request.url));
   }
 
@@ -68,7 +69,7 @@ export async function middleware(request: NextRequest) {
     if (!session) {
       return isApi ? unauthorizedApi() : NextResponse.redirect(new URL("/login", request.url));
     }
-    if (session.role !== "SUPERADMIN") {
+    if (session.role !== "SUPERADMIN" && session.role !== "CLUSTER") {
       return isApi ? NextResponse.json({ error: "Forbidden" }, { status: 403 }) : NextResponse.redirect(new URL("/store", request.url));
     }
   }

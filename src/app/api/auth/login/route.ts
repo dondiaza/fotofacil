@@ -31,6 +31,7 @@ export async function POST(request: Request) {
       uid: user.id,
       role: user.role,
       storeId: user.storeId,
+      clusterId: user.clusterId,
       username: user.username
     },
     {
@@ -39,7 +40,8 @@ export async function POST(request: Request) {
         id: user.id,
         role: user.role,
         username: user.username,
-        storeId: user.storeId
+        storeId: user.storeId,
+        clusterId: user.clusterId
       }
     }
   );

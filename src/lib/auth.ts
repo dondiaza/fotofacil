@@ -13,7 +13,8 @@ export async function authenticateUser(identifier: string, password: string) {
       ]
     },
     include: {
-      store: true
+      store: true,
+      cluster: true
     }
   });
 
@@ -29,6 +30,9 @@ export async function authenticateUser(identifier: string, password: string) {
   if (user.role === "STORE" && (!user.store || !user.store.isActive)) {
     return null;
   }
+  if (user.role === "CLUSTER" && (!user.cluster || !user.cluster.isActive)) {
+    return null;
+  }
 
   return user;
 }
@@ -38,7 +42,7 @@ export async function hashPassword(password: string) {
 }
 
 export async function issueSessionResponse(
-  payload: { uid: string; role: Role; storeId: string | null; username: string },
+  payload: { uid: string; role: Role; storeId: string | null; clusterId: string | null; username: string },
   body: unknown = { ok: true }
 ) {
   const token = await signSessionToken(payload);

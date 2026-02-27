@@ -2,7 +2,7 @@ import { z } from "zod";
 import { formatDateKey } from "@/lib/date";
 import { ensureChildFolder, ensureStoreFolder, uploadBufferToDrive } from "@/lib/drive";
 import { badRequest, forbidden, unauthorized } from "@/lib/http";
-import { notifyAdminByEmail } from "@/lib/notifications";
+import { notifyAdminByEmail, notifyManyByEmail } from "@/lib/notifications";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/request-auth";
 import { normalizeImageBuffer, extFromFilename } from "@/lib/upload";
@@ -20,14 +20,26 @@ type Context = {
   params: Promise<{ storeId: string }>;
 };
 
-function canAccessStoreChat(
-  session: { role: "STORE" | "SUPERADMIN"; storeId: string | null },
+async function canAccessStoreChat(
+  session: { role: "STORE" | "CLUSTER" | "SUPERADMIN"; storeId: string | null; clusterId: string | null },
   storeId: string
 ) {
   if (session.role === "SUPERADMIN") {
     return true;
   }
-  return session.role === "STORE" && session.storeId === storeId;
+  if (session.role === "STORE") {
+    return session.storeId === storeId;
+  }
+  if (session.role === "CLUSTER" && session.clusterId) {
+    const count = await prisma.store.count({
+      where: {
+        id: storeId,
+        clusterId: session.clusterId
+      }
+    });
+    return count > 0;
+  }
+  return false;
 }
 
 export async function GET(request: Request, context: Context) {
@@ -37,7 +49,7 @@ export async function GET(request: Request, context: Context) {
   }
 
   const { storeId } = await context.params;
-  if (!canAccessStoreChat(session, storeId)) {
+  if (!(await canAccessStoreChat(session, storeId))) {
     return forbidden();
   }
 
@@ -66,17 +78,29 @@ export async function GET(request: Request, context: Context) {
   const nextCursor = hasMore ? messages[messages.length - 1]?.id : null;
   const sorted = [...messages].reverse();
 
-  const unreadFilter =
-    session.role === "SUPERADMIN"
-      ? { storeId, fromRole: "STORE" as const, readAt: null }
-      : { storeId, fromRole: "SUPERADMIN" as const, readAt: null };
-
-  await prisma.message.updateMany({
-    where: unreadFilter,
-    data: {
-      readAt: new Date()
-    }
-  });
+  if (session.role === "STORE") {
+    await prisma.message.updateMany({
+      where: {
+        storeId,
+        readAt: null,
+        NOT: { fromRole: "STORE" }
+      },
+      data: {
+        readAt: new Date()
+      }
+    });
+  } else {
+    await prisma.message.updateMany({
+      where: {
+        storeId,
+        fromRole: "STORE",
+        readAt: null
+      },
+      data: {
+        readAt: new Date()
+      }
+    });
+  }
 
   return Response.json({
     items: sorted,
@@ -91,7 +115,7 @@ export async function POST(request: Request, context: Context) {
   }
 
   const { storeId } = await context.params;
-  if (!canAccessStoreChat(session, storeId)) {
+  if (!(await canAccessStoreChat(session, storeId))) {
     return forbidden();
   }
 
@@ -108,10 +132,34 @@ export async function POST(request: Request, context: Context) {
   }
 
   const store = await prisma.store.findUnique({
-    where: { id: storeId }
+    where: { id: storeId },
+    include: {
+      cluster: {
+        include: {
+          users: {
+            where: {
+              role: "CLUSTER",
+              email: {
+                not: null
+              }
+            },
+            select: {
+              email: true
+            }
+          }
+        }
+      }
+    }
   });
   if (!store) {
     return badRequest("Store not found");
+  }
+
+  if (session.role === "STORE" && !store.clusterId) {
+    return badRequest("Tu tienda no tiene cluster asignado. Contacta con superadmin.");
+  }
+  if (session.role === "CLUSTER" && session.clusterId !== store.clusterId) {
+    return forbidden();
   }
 
   let attachmentDriveFileId: string | null = null;
@@ -153,9 +201,22 @@ export async function POST(request: Request, context: Context) {
   });
 
   if (session.role === "STORE") {
+    const clusterEmails = (store.cluster?.users || []).map((user) => user.email).filter((email): email is string => Boolean(email));
+    if (clusterEmails.length > 0) {
+      await notifyManyByEmail(
+        clusterEmails,
+        `Nuevo mensaje de tienda ${store.storeCode}`,
+        `${store.name} (${store.storeCode}) envió un mensaje en FotoFácil.`
+      );
+    }
     await notifyAdminByEmail(
       `Nueva incidencia de tienda ${store.storeCode}`,
       `${store.name} (${store.storeCode}) envió un mensaje en FotoFácil.`
+    );
+  } else if (session.role === "CLUSTER") {
+    await notifyAdminByEmail(
+      `Cluster escribió sobre tienda ${store.storeCode}`,
+      `Un cluster envió un mensaje en la conversación de ${store.name} (${store.storeCode}).`
     );
   }
 
@@ -165,7 +226,8 @@ export async function POST(request: Request, context: Context) {
     storeId,
     payload: {
       messageId: message.id,
-      hasAttachment: Boolean(attachmentDriveFileId)
+      hasAttachment: Boolean(attachmentDriveFileId),
+      fromRole: session.role
     }
   });
 

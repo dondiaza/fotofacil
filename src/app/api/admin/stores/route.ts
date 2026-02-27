@@ -3,9 +3,9 @@ import { UploadStatus } from "@prisma/client";
 import { hashPassword } from "@/lib/auth";
 import { DEFAULT_DEADLINE } from "@/lib/constants";
 import { formatDateKey, toDayStart } from "@/lib/date";
-import { badRequest, unauthorized } from "@/lib/http";
+import { badRequest, forbidden, unauthorized } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/request-auth";
+import { requireManager, storeScopeWhere } from "@/lib/request-auth";
 import { writeAuditLog } from "@/lib/audit";
 
 const slotSchema = z.object({
@@ -18,6 +18,7 @@ const slotSchema = z.object({
 const createStoreSchema = z.object({
   name: z.string().min(1),
   storeCode: z.string().min(1).max(10),
+  clusterId: z.string().optional(),
   username: z.string().min(3),
   email: z.string().email().optional(),
   password: z.string().min(8).optional(),
@@ -35,8 +36,8 @@ function randomPassword(size = 10) {
 }
 
 export async function GET(request: Request) {
-  const admin = await requireAdmin();
-  if (!admin) {
+  const manager = await requireManager();
+  if (!manager) {
     return unauthorized();
   }
 
@@ -45,9 +46,22 @@ export async function GET(request: Request) {
   const statusFilter = url.searchParams.get("status");
   const includeInactive = url.searchParams.get("includeInactive") === "true";
 
+  const scope = storeScopeWhere(manager);
+  const where = {
+    ...(includeInactive ? {} : { isActive: true }),
+    ...scope
+  };
+
   const stores = await prisma.store.findMany({
-    where: includeInactive ? {} : { isActive: true },
+    where,
     include: {
+      cluster: {
+        select: {
+          id: true,
+          name: true,
+          code: true
+        }
+      },
       users: {
         where: { role: "STORE" },
         select: {
@@ -63,7 +77,9 @@ export async function GET(request: Request) {
           status: true,
           completedAt: true,
           updatedAt: true,
-          driveFolderId: true
+          driveFolderId: true,
+          isSent: true,
+          requirementKind: true
         },
         take: 1
       },
@@ -81,7 +97,9 @@ export async function GET(request: Request) {
           messages: {
             where: {
               readAt: null,
-              fromRole: "STORE"
+              fromRole: {
+                in: ["STORE", "CLUSTER"]
+              }
             }
           }
         }
@@ -100,9 +118,12 @@ export async function GET(request: Request) {
         id: store.id,
         name: store.name,
         storeCode: store.storeCode,
+        cluster: store.cluster,
         isActive: store.isActive,
         deadlineTime: store.deadlineTime ?? DEFAULT_DEADLINE,
         todayStatus: status,
+        todayIsSent: todayUpload?.isSent ?? false,
+        todayRequirementKind: todayUpload?.requirementKind ?? "NONE",
         todayDate: formatDateKey(today),
         todayDriveFolderId: todayUpload?.driveFolderId ?? null,
         lastUploadAt: todayUpload?.updatedAt ?? null,
@@ -122,9 +143,12 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const admin = await requireAdmin();
-  if (!admin) {
+  const manager = await requireManager();
+  if (!manager) {
     return unauthorized();
+  }
+  if (!manager.isSuperAdmin) {
+    return forbidden("Solo superadmin puede crear tiendas");
   }
 
   const body = await request.json().catch(() => null);
@@ -144,6 +168,16 @@ export async function POST(request: Request) {
     }
   }
 
+  if (payload.clusterId) {
+    const cluster = await prisma.cluster.findUnique({
+      where: { id: payload.clusterId },
+      select: { id: true }
+    });
+    if (!cluster) {
+      return badRequest("clusterId no válido");
+    }
+  }
+
   const existingStore = await prisma.store.findUnique({ where: { storeCode } });
   if (existingStore) {
     return badRequest("storeCode already exists");
@@ -151,10 +185,7 @@ export async function POST(request: Request) {
 
   const existingUser = await prisma.user.findFirst({
     where: {
-      OR: [
-        { username },
-        payload.email ? { email: payload.email } : { id: "__none__" }
-      ]
+      OR: [{ username }, payload.email ? { email: payload.email } : { id: "__none__" }]
     }
   });
   if (existingUser) {
@@ -169,6 +200,7 @@ export async function POST(request: Request) {
       data: {
         name: payload.name.trim(),
         storeCode,
+        clusterId: payload.clusterId ?? null,
         deadlineTime: payload.deadlineTime ?? null
       }
     });
@@ -180,7 +212,8 @@ export async function POST(request: Request) {
         email: payload.email?.trim().toLowerCase() ?? null,
         passwordHash,
         mustChangePw: true,
-        storeId: store.id
+        storeId: store.id,
+        clusterId: store.clusterId
       }
     });
 
@@ -201,7 +234,7 @@ export async function POST(request: Request) {
 
   await writeAuditLog({
     action: "ADMIN_STORE_CREATED",
-    userId: admin.uid,
+    userId: manager.session.uid,
     storeId: created.id,
     payload: {
       storeCode: created.storeCode,
@@ -215,6 +248,7 @@ export async function POST(request: Request) {
       id: created.id,
       name: created.name,
       storeCode: created.storeCode,
+      clusterId: created.clusterId,
       deadlineTime: created.deadlineTime ?? DEFAULT_DEADLINE
     },
     credentials: {

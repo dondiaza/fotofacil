@@ -1,13 +1,13 @@
 import JSZip from "jszip";
 import { formatDateKey, parseDateKey, todayDateKey } from "@/lib/date";
-import { badRequest, unauthorized } from "@/lib/http";
+import { badRequest, forbidden, unauthorized } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/request-auth";
+import { canManagerAccessStore, requireManager } from "@/lib/request-auth";
 import { downloadDriveFile } from "@/lib/drive";
 
 export async function GET(request: Request) {
-  const admin = await requireAdmin();
-  if (!admin) {
+  const manager = await requireManager();
+  if (!manager) {
     return unauthorized();
   }
 
@@ -17,6 +17,9 @@ export async function GET(request: Request) {
 
   if (!storeId) {
     return badRequest("storeId is required");
+  }
+  if (!(await canManagerAccessStore(manager, storeId))) {
+    return forbidden();
   }
 
   let day: Date;
@@ -40,6 +43,9 @@ export async function GET(request: Request) {
         }
       },
       files: {
+        where: {
+          isCurrentVersion: true
+        },
         orderBy: [{ slotName: "asc" }, { sequence: "asc" }],
         select: {
           driveFileId: true,

@@ -8,7 +8,7 @@ export default async function StoreMessagesPage() {
   const unread = await prisma.message.count({
     where: {
       storeId: store.id,
-      fromRole: "SUPERADMIN",
+      NOT: { fromRole: "STORE" },
       readAt: null
     }
   });

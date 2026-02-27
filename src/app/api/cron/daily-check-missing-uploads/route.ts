@@ -1,9 +1,10 @@
-import { UploadStatus } from "@prisma/client";
 import { DEFAULT_DEADLINE } from "@/lib/constants";
 import { formatDateKey, nowMinutes, parseDeadlineToMinutes, toDayStart } from "@/lib/date";
 import { badRequest } from "@/lib/http";
-import { notifyAdminByEmail } from "@/lib/notifications";
+import { notifyAdminByEmail, notifyManyByEmail } from "@/lib/notifications";
 import { prisma } from "@/lib/prisma";
+import { getOrCreateUploadDay, refreshUploadDayStatus } from "@/lib/store-service";
+import { requirementToHuman } from "@/lib/upload-requirements";
 import { writeAuditLog } from "@/lib/audit";
 
 export async function POST(request: Request) {
@@ -17,18 +18,35 @@ export async function POST(request: Request) {
   const stores = await prisma.store.findMany({
     where: { isActive: true },
     include: {
-      uploadDays: {
-        where: { date: today },
+      cluster: {
         select: {
           id: true,
-          status: true
+          name: true,
+          users: {
+            where: {
+              role: "CLUSTER",
+              email: { not: null }
+            },
+            select: {
+              email: true
+            }
+          }
+        }
+      },
+      users: {
+        where: {
+          role: "STORE",
+          email: { not: null }
         },
-        take: 1
+        select: {
+          email: true
+        }
       }
     }
   });
 
-  const triggered: Array<{ storeId: string; storeCode: string; name: string }> = [];
+  const triggered: Array<{ storeId: string; storeCode: string; name: string; clusterName: string | null }> = [];
+  const recipients = new Set<string>();
 
   for (const store of stores) {
     const deadline = store.deadlineTime || DEFAULT_DEADLINE;
@@ -37,8 +55,16 @@ export async function POST(request: Request) {
       continue;
     }
 
-    const todayStatus = store.uploadDays[0]?.status ?? UploadStatus.PENDING;
-    if (todayStatus === UploadStatus.COMPLETE) {
+    const uploadDay = await getOrCreateUploadDay(store.id, store.clusterId ?? null, today);
+    const updatedDay = await refreshUploadDayStatus(uploadDay.id);
+    if (!updatedDay) {
+      continue;
+    }
+
+    if (updatedDay.requirementKind === "NONE") {
+      continue;
+    }
+    if (updatedDay.isSent) {
       continue;
     }
 
@@ -67,7 +93,7 @@ export async function POST(request: Request) {
       data: {
         storeId: store.id,
         fromRole: "SUPERADMIN",
-        text: "Recordatorio automático: aún no se ha completado el set diario de fotos."
+        text: `Recordatorio automático: hoy se requiere ${requirementToHuman(updatedDay.requirementKind)} y aún está en "No enviado".`
       }
     });
 
@@ -76,24 +102,38 @@ export async function POST(request: Request) {
       storeId: store.id,
       payload: {
         date: formatDateKey(today),
-        deadline
+        deadline,
+        requirementKind: updatedDay.requirementKind,
+        clusterId: store.clusterId
       }
     });
 
     triggered.push({
       storeId: store.id,
       storeCode: store.storeCode,
-      name: store.name
+      name: store.name,
+      clusterName: store.cluster?.name ?? null
     });
+
+    for (const clusterUser of store.cluster?.users || []) {
+      if (clusterUser.email) {
+        recipients.add(clusterUser.email);
+      }
+    }
+    for (const storeUser of store.users) {
+      if (storeUser.email) {
+        recipients.add(storeUser.email);
+      }
+    }
   }
 
   if (triggered.length > 0) {
-    await notifyAdminByEmail(
-      "Alertas de FotoFácil: tiendas sin set diario completo",
-      `Fecha ${formatDateKey(today)}. Tiendas: ${triggered
-        .map((s) => `${s.storeCode} ${s.name}`)
-        .join(", ")}`
-    );
+    const subject = "Alertas FotoFacil: tiendas No enviadas";
+    const text = `Fecha ${formatDateKey(today)}. Pendientes: ${triggered
+      .map((s) => `${s.clusterName ? `[${s.clusterName}] ` : ""}${s.storeCode} ${s.name}`)
+      .join(", ")}`;
+    await notifyAdminByEmail(subject, text);
+    await notifyManyByEmail([...recipients], subject, text);
   }
 
   return Response.json({

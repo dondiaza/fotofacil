@@ -19,6 +19,6 @@ export async function GET(request: Request) {
     return badRequest((error as Error).message);
   }
 
-  const view = await getStoreDayView(auth.store.id, day);
+  const view = await getStoreDayView(auth.store.id, auth.store.clusterId ?? null, day);
   return Response.json(view);
 }

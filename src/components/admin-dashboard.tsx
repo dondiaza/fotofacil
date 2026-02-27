@@ -18,6 +18,17 @@ type StoreRow = {
   user: { username: string; email: string | null } | null;
 };
 
+type KpiRow = {
+  storeId: string;
+  storeCode: string;
+  storeName: string;
+  requiredDays: number;
+  sentDays: number;
+  validatedFiles: number;
+  totalFiles: number;
+  incidents: number;
+};
+
 const filters = [
   { id: "ALL", label: "Todas" },
   { id: "PENDING", label: "Pendientes" },
@@ -27,10 +38,19 @@ const filters = [
 
 export function AdminDashboard() {
   const [rows, setRows] = useState<StoreRow[]>([]);
+  const [kpis, setKpis] = useState<KpiRow[]>([]);
+  const [weekStart, setWeekStart] = useState(() => {
+    const now = new Date();
+    const day = now.getDay() || 7;
+    now.setDate(now.getDate() - day + 1);
+    return now.toISOString().slice(0, 10);
+  });
   const [filter, setFilter] = useState<(typeof filters)[number]["id"]>("ALL");
   const [loading, setLoading] = useState(true);
+  const [loadingKpis, setLoadingKpis] = useState(true);
   const [reminding, setReminding] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [kpiError, setKpiError] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -54,6 +74,28 @@ export function AdminDashboard() {
   useEffect(() => {
     void load();
   }, [filter]);
+
+  const loadKpis = async (targetWeekStart = weekStart) => {
+    setLoadingKpis(true);
+    setKpiError(null);
+    try {
+      const response = await fetch(`/api/admin/kpis?weekStart=${targetWeekStart}`, { cache: "no-store" });
+      const json = await response.json();
+      if (!response.ok) {
+        setKpiError(json.error || "No se pudieron cargar KPIs");
+        return;
+      }
+      setKpis(json.items || []);
+    } catch {
+      setKpiError("Error de conexión en KPIs");
+    } finally {
+      setLoadingKpis(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadKpis(weekStart);
+  }, [weekStart]);
 
   const summary = useMemo(() => {
     return {
@@ -167,6 +209,62 @@ export function AdminDashboard() {
           ))}
           {!loading && rows.length === 0 ? <li className="text-sm text-muted">Sin resultados para este filtro.</li> : null}
         </ul>
+      </article>
+
+      <article className="panel p-4">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">KPIs por tienda (semanal)</p>
+          <input
+            type="date"
+            value={weekStart}
+            onChange={(event) => setWeekStart(event.target.value)}
+            className="input h-9 max-w-[180px]"
+          />
+          <button onClick={() => void loadKpis(weekStart)} className="btn-ghost h-9 px-3 text-xs">
+            Actualizar
+          </button>
+        </div>
+        {loadingKpis ? <p className="text-sm text-muted">Cargando KPIs...</p> : null}
+        {kpiError ? <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{kpiError}</p> : null}
+        {!loadingKpis ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-[0.08em] text-muted">
+                  <th className="px-2 py-2">Tienda</th>
+                  <th className="px-2 py-2">Enviados</th>
+                  <th className="px-2 py-2">Validados</th>
+                  <th className="px-2 py-2">Incidencias</th>
+                </tr>
+              </thead>
+              <tbody>
+                {kpis.map((item) => (
+                  <tr key={item.storeId} className="border-t border-line">
+                    <td className="px-2 py-2">
+                      <p className="font-semibold">
+                        {item.storeCode} · {item.storeName}
+                      </p>
+                    </td>
+                    <td className="px-2 py-2">
+                      {item.sentDays}/{item.requiredDays}
+                    </td>
+                    <td className="px-2 py-2">
+                      {item.validatedFiles}/{item.totalFiles}
+                    </td>
+                    <td className="px-2 py-2">{item.incidents}</td>
+                  </tr>
+                ))}
+                {!loadingKpis && kpis.length === 0 ? (
+                  <tr>
+                    <td className="px-2 py-3 text-sm text-muted" colSpan={4}>
+                      Sin datos de KPI para esa semana.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
       </article>
     </section>
   );

@@ -1,58 +1,33 @@
 import { PrismaClient } from "@prisma/client";
-import fs from "node:fs";
-import path from "node:path";
 
 declare global {
   // eslint-disable-next-line no-var
   var prisma: PrismaClient | undefined;
 }
 
-function getSqliteFilePath(databaseUrl: string) {
-  if (!databaseUrl.startsWith("file:")) {
-    return null;
-  }
+function resolveDatabaseUrl() {
+  const raw = (process.env.DATABASE_URL || "").trim();
+  const neonCandidates = [
+    process.env.fotofacil_DATABASE_URL,
+    process.env.POSTGRES_PRISMA_URL,
+    process.env.POSTGRES_URL,
+    process.env.DATABASE_URL_UNPOOLED,
+    process.env.POSTGRES_URL_NON_POOLING
+  ]
+    .map((value) => (value || "").trim())
+    .filter(Boolean);
 
-  const rawPath = databaseUrl.slice("file:".length).split("?")[0];
-  if (!rawPath) {
-    return null;
+  const neon = neonCandidates[0] || "";
+  if (neon && (!raw || raw.startsWith("file:"))) {
+    return neon;
   }
-
-  if (rawPath.startsWith("//")) {
-    return rawPath.slice(1);
-  }
-
-  if (path.isAbsolute(rawPath)) {
-    return rawPath;
-  }
-
-  return path.resolve(process.cwd(), rawPath);
+  return raw || neon || "";
 }
 
-function ensureVercelSqliteBootstrap() {
-  const dbUrl = process.env.DATABASE_URL;
-  if (!process.env.VERCEL || !dbUrl) {
-    return;
-  }
-
-  const dbPath = getSqliteFilePath(dbUrl);
-  if (!dbPath || !dbPath.startsWith("/tmp/")) {
-    return;
-  }
-
-  if (fs.existsSync(dbPath) && fs.statSync(dbPath).size > 0) {
-    return;
-  }
-
-  const templatePath = path.join(process.cwd(), "prisma", "base.db");
-  if (!fs.existsSync(templatePath)) {
-    throw new Error("Missing prisma/base.db for Vercel SQLite bootstrap");
-  }
-
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  fs.copyFileSync(templatePath, dbPath);
+const resolvedDatabaseUrl = resolveDatabaseUrl();
+if (resolvedDatabaseUrl) {
+  process.env.DATABASE_URL = resolvedDatabaseUrl;
 }
-
-ensureVercelSqliteBootstrap();
 
 export const prisma =
   global.prisma ??

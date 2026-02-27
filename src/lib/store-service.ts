@@ -1,7 +1,8 @@
 import { UploadStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { computeDayStatus, sortSlots } from "@/lib/slots";
+import { sortSlots } from "@/lib/slots";
 import { formatDateKey, toDayStart } from "@/lib/date";
+import { evaluateDaySent, getRequirementForStoreDate } from "@/lib/upload-requirements";
 
 export async function getEffectiveSlots(storeId: string) {
   const storeSlots = await prisma.slotTemplate.findMany({
@@ -33,10 +34,11 @@ export async function getEffectiveSlots(storeId: string) {
   return sortSlots(globalSlots);
 }
 
-export async function getOrCreateUploadDay(storeId: string, date: Date) {
+export async function getOrCreateUploadDay(storeId: string, clusterId: string | null, date: Date) {
   const dayDate = toDayStart(date);
+  const requirementKind = await getRequirementForStoreDate(storeId, clusterId, dayDate);
 
-  return prisma.uploadDay.upsert({
+  const uploadDay = await prisma.uploadDay.upsert({
     where: {
       storeId_date: {
         storeId,
@@ -46,19 +48,26 @@ export async function getOrCreateUploadDay(storeId: string, date: Date) {
     create: {
       storeId,
       date: dayDate,
-      status: UploadStatus.PENDING
+      requirementKind,
+      status: UploadStatus.PENDING,
+      isSent: false
     },
-    update: {}
+    update: {
+      requirementKind
+    }
   });
+
+  return uploadDay;
 }
 
-export async function refreshUploadDayStatus(uploadDayId: string, slots: { name: string; required: boolean }[]) {
+export async function refreshUploadDayStatus(uploadDayId: string) {
   const uploadDay = await prisma.uploadDay.findUnique({
     where: { id: uploadDayId },
     include: {
       files: {
         select: {
-          slotName: true
+          kind: true,
+          isCurrentVersion: true
         }
       }
     }
@@ -68,24 +77,25 @@ export async function refreshUploadDayStatus(uploadDayId: string, slots: { name:
     return null;
   }
 
-  const next = computeDayStatus(slots, uploadDay.files);
-  const completedAt = next === "COMPLETE" ? uploadDay.completedAt ?? new Date() : null;
+  const evalResult = evaluateDaySent(uploadDay.requirementKind, uploadDay.files);
+  const completedAt = evalResult.isSent ? uploadDay.completedAt ?? new Date() : null;
 
   return prisma.uploadDay.update({
     where: { id: uploadDayId },
     data: {
-      status: next,
+      status: evalResult.status,
+      isSent: evalResult.isSent,
       completedAt
     }
   });
 }
 
-export async function getStoreDayView(storeId: string, date: Date) {
+export async function getStoreDayView(storeId: string, clusterId: string | null, date: Date) {
   const slots = await getEffectiveSlots(storeId);
-  const uploadDay = await getOrCreateUploadDay(storeId, date);
+  const uploadDay = await getOrCreateUploadDay(storeId, clusterId, date);
 
   const files = await prisma.uploadFile.findMany({
-    where: { uploadDayId: uploadDay.id },
+    where: { uploadDayId: uploadDay.id, isCurrentVersion: true },
     orderBy: { createdAt: "desc" }
   });
 
@@ -102,26 +112,31 @@ export async function getStoreDayView(storeId: string, date: Date) {
     order: slot.order,
     done: Boolean(fileBySlot[slot.name]?.length),
     count: fileBySlot[slot.name]?.length ?? 0,
-    preview:
-      fileBySlot[slot.name]?.[0]?.driveFileId
-        ? `https://drive.google.com/thumbnail?id=${fileBySlot[slot.name][0].driveFileId}`
-        : null
+    preview: fileBySlot[slot.name]?.[0]?.driveFileId
+      ? `https://drive.google.com/thumbnail?id=${fileBySlot[slot.name][0].driveFileId}`
+      : null
   }));
 
-  const status = computeDayStatus(slots, files);
-  if (status !== uploadDay.status) {
+  const evalResult = evaluateDaySent(uploadDay.requirementKind, files);
+  if (evalResult.status !== uploadDay.status || evalResult.isSent !== uploadDay.isSent) {
     await prisma.uploadDay.update({
       where: { id: uploadDay.id },
       data: {
-        status,
-        completedAt: status === "COMPLETE" ? uploadDay.completedAt ?? new Date() : null
+        status: evalResult.status,
+        isSent: evalResult.isSent,
+        completedAt: evalResult.isSent ? uploadDay.completedAt ?? new Date() : null
       }
     });
   }
 
   return {
     date: formatDateKey(uploadDay.date),
-    status,
+    status: evalResult.status,
+    isSent: evalResult.isSent,
+    requirementKind: uploadDay.requirementKind,
+    missingKinds: evalResult.missingKinds,
+    photoCount: files.filter((file) => file.kind === "PHOTO").length,
+    videoCount: files.filter((file) => file.kind === "VIDEO").length,
     slots: slotChecks,
     driveFolderId: uploadDay.driveFolderId
   };

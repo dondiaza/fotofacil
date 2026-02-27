@@ -2,7 +2,13 @@ import { z } from "zod";
 import { badRequest, unauthorized } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/request-auth";
-import { assertDriveFolderWritable, getConfiguredDriveRootFolderId, getDriveFolderMeta, isDriveStorageQuotaError } from "@/lib/drive";
+import {
+  assertDriveFolderWritable,
+  getConfiguredDriveRootFolderId,
+  getDriveAuthMode,
+  getDriveFolderMeta,
+  isDriveStorageQuotaError
+} from "@/lib/drive";
 import { writeAuditLog } from "@/lib/audit";
 
 const payloadSchema = z.object({
@@ -19,6 +25,7 @@ export async function GET() {
     where: { id: 1 }
   });
   const effectiveRootId = await getConfiguredDriveRootFolderId();
+  const authMode = getDriveAuthMode();
 
   let rootMeta: { id?: string | null; name?: string | null; webViewLink?: string | null } | null = null;
   if (effectiveRootId) {
@@ -38,7 +45,8 @@ export async function GET() {
     item: {
       driveRootFolderId: config?.driveRootFolderId || null,
       effectiveDriveRootFolderId: effectiveRootId,
-      rootMeta
+      rootMeta,
+      authMode
     }
   });
 }
@@ -53,6 +61,10 @@ export async function PUT(request: Request) {
   const parsed = payloadSchema.safeParse(body);
   if (!parsed.success) {
     return badRequest("driveRootFolderId is required");
+  }
+
+  if (getDriveAuthMode() === "none") {
+    return badRequest("Configura credenciales de Google Drive (Service Account o OAuth backend) antes de vincular carpetas.");
   }
 
   let meta;

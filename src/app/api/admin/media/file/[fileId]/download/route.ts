@@ -1,6 +1,6 @@
-import { badRequest, unauthorized } from "@/lib/http";
+import { badRequest, forbidden, unauthorized } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/request-auth";
+import { canManagerAccessStore, requireManager } from "@/lib/request-auth";
 import { downloadDriveFile } from "@/lib/drive";
 
 type Context = {
@@ -8,8 +8,8 @@ type Context = {
 };
 
 export async function GET(_: Request, context: Context) {
-  const admin = await requireAdmin();
-  if (!admin) {
+  const manager = await requireManager();
+  if (!manager) {
     return unauthorized();
   }
 
@@ -18,6 +18,11 @@ export async function GET(_: Request, context: Context) {
     where: { id: fileId },
     select: {
       id: true,
+      uploadDay: {
+        select: {
+          storeId: true
+        }
+      },
       driveFileId: true,
       finalFilename: true,
       mimeType: true
@@ -26,6 +31,9 @@ export async function GET(_: Request, context: Context) {
 
   if (!file) {
     return badRequest("Archivo no encontrado");
+  }
+  if (!(await canManagerAccessStore(manager, file.uploadDay.storeId))) {
+    return forbidden();
   }
 
   const downloaded = await downloadDriveFile(file.driveFileId);

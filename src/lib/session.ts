@@ -9,6 +9,7 @@ export type SessionPayload = {
   uid: string;
   role: Role;
   storeId: string | null;
+  clusterId: string | null;
   username: string;
 };
 

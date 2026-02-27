@@ -14,7 +14,9 @@ type StoreItem = {
   user: { username: string; email: string | null } | null;
 };
 
-export function AdminStoreManager() {
+type ManagerRole = "SUPERADMIN" | "CLUSTER";
+
+export function AdminStoreManager({ managerRole }: { managerRole: ManagerRole }) {
   const [rows, setRows] = useState<StoreItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -138,57 +140,65 @@ export function AdminStoreManager() {
   return (
     <section className="grid gap-4 lg:grid-cols-[360px_1fr]">
       <div className="space-y-4">
-        <form onSubmit={onSubmit} className="panel space-y-3 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Nueva tienda</p>
-          <input required className="input" placeholder="Nombre tienda" value={name} onChange={(e) => setName(e.target.value)} />
-          <input
-            required
-            className="input"
-            placeholder="Store code (ej. 043)"
-            value={storeCode}
-            onChange={(e) => setStoreCode(e.target.value.toUpperCase())}
-          />
-          <input
-            required
-            className="input"
-            placeholder="Usuario login"
-            value={username}
-            onChange={(e) => setUsername(e.target.value.toLowerCase())}
-          />
-          <input className="input" placeholder="Email (opcional)" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input className="input" type="time" value={deadlineTime} onChange={(e) => setDeadlineTime(e.target.value)} />
-          <textarea
-            className="w-full rounded-xl border border-line p-3 text-sm outline-none focus:border-primary"
-            rows={4}
-            value={slots}
-            onChange={(e) => setSlots(e.target.value)}
-            placeholder="Slots separados por coma"
-          />
-          {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p> : null}
-          {createdCredentials ? (
-            <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-success">
-              Credenciales: {createdCredentials.username} / {createdCredentials.password}
-            </p>
-          ) : null}
-          <button disabled={saving} className="btn-primary h-11 w-full disabled:opacity-60">
-            {saving ? "Creando..." : "Crear tienda"}
-          </button>
-        </form>
+        {managerRole === "SUPERADMIN" ? (
+          <form onSubmit={onSubmit} className="panel space-y-3 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Nueva tienda</p>
+            <input required className="input" placeholder="Nombre tienda" value={name} onChange={(e) => setName(e.target.value)} />
+            <input
+              required
+              className="input"
+              placeholder="Store code (ej. 043)"
+              value={storeCode}
+              onChange={(e) => setStoreCode(e.target.value.toUpperCase())}
+            />
+            <input
+              required
+              className="input"
+              placeholder="Usuario login"
+              value={username}
+              onChange={(e) => setUsername(e.target.value.toLowerCase())}
+            />
+            <input className="input" placeholder="Email (opcional)" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <input className="input" type="time" value={deadlineTime} onChange={(e) => setDeadlineTime(e.target.value)} />
+            <textarea
+              className="w-full rounded-xl border border-line p-3 text-sm outline-none focus:border-primary"
+              rows={4}
+              value={slots}
+              onChange={(e) => setSlots(e.target.value)}
+              placeholder="Slots separados por coma"
+            />
+            {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{error}</p> : null}
+            {createdCredentials ? (
+              <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-success">
+                Credenciales: {createdCredentials.username} / {createdCredentials.password}
+              </p>
+            ) : null}
+            <button disabled={saving} className="btn-primary h-11 w-full disabled:opacity-60">
+              {saving ? "Creando..." : "Crear tienda"}
+            </button>
+          </form>
+        ) : (
+          <article className="panel p-4 text-sm text-muted">
+            Como <strong>Cluster</strong> puedes gestionar tus tiendas y validar contenido. El alta de tiendas queda reservada a superadmin.
+          </article>
+        )}
 
-        <article className="panel space-y-3 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Plantilla global de slots</p>
-          <textarea
-            className="w-full rounded-xl border border-line p-3 text-sm outline-none focus:border-primary"
-            rows={4}
-            value={globalSlots}
-            onChange={(e) => setGlobalSlots(e.target.value)}
-            placeholder="Slots globales separados por coma"
-          />
-          {globalMessage ? <p className="rounded-lg bg-slate-100 px-3 py-2 text-sm text-muted">{globalMessage}</p> : null}
-          <button onClick={onSaveGlobalSlots} disabled={savingGlobal} className="btn-ghost h-10 w-full disabled:opacity-60">
-            {savingGlobal ? "Guardando..." : "Guardar plantilla global"}
-          </button>
-        </article>
+        {managerRole === "SUPERADMIN" ? (
+          <article className="panel space-y-3 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Plantilla global de slots</p>
+            <textarea
+              className="w-full rounded-xl border border-line p-3 text-sm outline-none focus:border-primary"
+              rows={4}
+              value={globalSlots}
+              onChange={(e) => setGlobalSlots(e.target.value)}
+              placeholder="Slots globales separados por coma"
+            />
+            {globalMessage ? <p className="rounded-lg bg-slate-100 px-3 py-2 text-sm text-muted">{globalMessage}</p> : null}
+            <button onClick={onSaveGlobalSlots} disabled={savingGlobal} className="btn-ghost h-10 w-full disabled:opacity-60">
+              {savingGlobal ? "Guardando..." : "Guardar plantilla global"}
+            </button>
+          </article>
+        ) : null}
       </div>
 
       <article className="panel p-4">

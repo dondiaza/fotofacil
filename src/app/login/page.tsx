@@ -5,7 +5,7 @@ import { getSession } from "@/lib/session";
 export default async function LoginPage() {
   const session = await getSession();
   if (session) {
-    redirect(session.role === "SUPERADMIN" ? "/admin" : "/store");
+    redirect(session.role === "STORE" ? "/store" : "/admin");
   }
 
   return (

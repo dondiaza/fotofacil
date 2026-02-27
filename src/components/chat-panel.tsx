@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-type Role = "STORE" | "SUPERADMIN";
+type Role = "STORE" | "CLUSTER" | "SUPERADMIN";
 
 type MessageItem = {
   id: string;
@@ -140,7 +140,9 @@ export function ChatPanel({ storeId, currentRole, title }: ChatPanelProps) {
               key={msg.id}
               className={`max-w-[88%] rounded-xl px-3 py-2 text-sm ${mine ? "ml-auto bg-primary text-white" : "bg-slate-100 text-text"}`}
             >
-              <p className="mb-1 text-[11px] font-semibold opacity-80">{msg.fromRole === "STORE" ? "Tienda" : "Admin"}</p>
+              <p className="mb-1 text-[11px] font-semibold opacity-80">
+                {msg.fromRole === "STORE" ? "Tienda" : msg.fromRole === "CLUSTER" ? "Cluster" : "Admin"}
+              </p>
               {msg.text ? <p className="whitespace-pre-wrap">{msg.text}</p> : null}
               {msg.attachmentWebViewLink ? (
                 <a
